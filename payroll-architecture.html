@@ -1,0 +1,1226 @@
+<title>طراحی معماری موتور حقوق و دستمزد</title>
+<style>
+  :root {
+    --paper: #F4F7F1;
+    --paper-stripe: #E4EDE1;
+    --card: #FFFFFF;
+    --ink: #16241D;
+    --ink-soft: #45564C;
+    --ink-faint: #6E7D6C;
+    --accent: #A8681F;
+    --accent-deep: #7C4A16;
+    --accent-soft: #F1E2CC;
+    --line: #C9D6C4;
+    --line-soft: #DCE6D8;
+    --mono-bg: #101A13;
+    --mono-fg: #DCEFDD;
+    --mono-dim: #7FAE86;
+    --success: #2E7D4F;
+    --success-soft: #E1F0E5;
+    --warning: #A8681F;
+    --warning-soft: #F1E2CC;
+    --critical: #B23A34;
+    --critical-soft: #F6E1DF;
+    --shadow: 0 1px 2px rgba(22,36,29,0.06), 0 8px 24px -12px rgba(22,36,29,0.18);
+    --radius: 10px;
+    --font-body: "Vazirmatn", "IRANSans", "Segoe UI", Tahoma, system-ui, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0F1610;
+      --paper-stripe: #16201A;
+      --card: #141D16;
+      --ink: #E7EEE3;
+      --ink-soft: #A9BCA9;
+      --ink-faint: #7C8C7A;
+      --accent: #E0A855;
+      --accent-deep: #F0C079;
+      --accent-soft: #2E250F;
+      --line: #263429;
+      --line-soft: #1D2A20;
+      --mono-bg: #0A120B;
+      --mono-fg: #CFE9D2;
+      --mono-dim: #5F9268;
+      --success: #59B27E;
+      --success-soft: #123321;
+      --warning: #E0A855;
+      --warning-soft: #2E250F;
+      --critical: #E17971;
+      --critical-soft: #33191A;
+      --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 12px 30px -14px rgba(0,0,0,0.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0F1610; --paper-stripe: #16201A; --card: #141D16; --ink: #E7EEE3; --ink-soft: #A9BCA9;
+    --ink-faint: #7C8C7A; --accent: #E0A855; --accent-deep: #F0C079; --accent-soft: #2E250F;
+    --line: #263429; --line-soft: #1D2A20; --mono-bg: #0A120B; --mono-fg: #CFE9D2; --mono-dim: #5F9268;
+    --success: #59B27E; --success-soft: #123321; --warning: #E0A855; --warning-soft: #2E250F;
+    --critical: #E17971; --critical-soft: #33191A; --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 12px 30px -14px rgba(0,0,0,0.6);
+  }
+  :root[data-theme="light"] {
+    --paper: #F4F7F1; --paper-stripe: #E4EDE1; --card: #FFFFFF; --ink: #16241D; --ink-soft: #45564C;
+    --ink-faint: #6E7D6C; --accent: #A8681F; --accent-deep: #7C4A16; --accent-soft: #F1E2CC;
+    --line: #C9D6C4; --line-soft: #DCE6D8; --mono-bg: #101A13; --mono-fg: #DCEFDD; --mono-dim: #7FAE86;
+    --success: #2E7D4F; --success-soft: #E1F0E5; --warning: #A8681F; --warning-soft: #F1E2CC;
+    --critical: #B23A34; --critical-soft: #F6E1DF; --shadow: 0 1px 2px rgba(22,36,29,0.06), 0 8px 24px -12px rgba(22,36,29,0.18);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { background: var(--paper); }
+  body {
+    font-family: var(--font-body);
+    color: var(--ink);
+    line-height: 1.85;
+    font-size: 16px;
+  }
+  .doc { direction: rtl; max-width: 100%; }
+
+  /* ---------- Cover ---------- */
+  .cover {
+    padding: 64px 8vw 48px;
+    background:
+      repeating-linear-gradient(0deg, var(--paper-stripe) 0px, var(--paper-stripe) 2px, transparent 2px, transparent 34px),
+      var(--paper);
+    border-bottom: 1px solid var(--line);
+  }
+  .cover-eyebrow {
+    font-family: var(--font-mono);
+    direction: ltr;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12.5px;
+    letter-spacing: 0.14em;
+    color: var(--accent-deep);
+    background: var(--accent-soft);
+    border: 1px solid var(--line);
+    padding: 5px 12px;
+    border-radius: 999px;
+  }
+  .cover h1 {
+    margin: 22px 0 10px;
+    font-size: clamp(30px, 4vw, 46px);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    max-width: 22ch;
+  }
+  .cover p.lead {
+    max-width: 62ch;
+    color: var(--ink-soft);
+    font-size: 18px;
+    margin: 0 0 22px;
+  }
+  .cover-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 28px;
+    font-size: 13.5px;
+    color: var(--ink-faint);
+    border-top: 1px solid var(--line);
+    padding-top: 18px;
+    margin-top: 8px;
+  }
+  .cover-meta b { color: var(--ink); font-weight: 700; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--font-mono); direction: ltr; font-size: 12.5px; font-weight: 600;
+    padding: 4px 12px; border-radius: 999px;
+    background: var(--warning-soft); color: var(--accent-deep); border: 1px solid var(--line);
+  }
+  .status-pill .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--accent); }
+
+  /* ---------- Shell layout ---------- */
+  .shell {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 0;
+    align-items: start;
+  }
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: 1fr; }
+    .toc { position: static !important; height: auto !important; }
+  }
+
+  .toc {
+    position: sticky; top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 28px 20px 40px;
+    border-inline-start: 1px solid var(--line);
+    background: var(--paper);
+  }
+  .toc-title {
+    font-family: var(--font-mono); direction: ltr; font-size: 11px; letter-spacing: 0.16em;
+    color: var(--ink-faint); text-transform: uppercase; margin-bottom: 14px;
+  }
+  .toc ol { list-style: none; margin: 0; padding: 0; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a {
+    display: flex; gap: 10px; align-items: baseline;
+    padding: 7px 8px; border-radius: 7px;
+    color: var(--ink-soft); text-decoration: none; font-size: 13.6px;
+    transition: background .12s ease, color .12s ease;
+  }
+  .toc a:hover { background: var(--paper-stripe); color: var(--ink); }
+  .toc a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .toc a::before {
+    content: counter(toc, decimal-leading-zero);
+    font-family: var(--font-mono); direction: ltr; color: var(--accent); font-size: 12px;
+    min-width: 20px;
+  }
+
+  main.content { padding: 8px 8vw 120px; min-width: 0; }
+
+  section.block { padding: 46px 0; border-bottom: 1px solid var(--line); }
+  section.block:last-child { border-bottom: none; }
+
+  .kicker {
+    font-family: var(--font-mono); direction: ltr; font-size: 12px; letter-spacing: 0.12em;
+    color: var(--accent-deep); text-transform: uppercase; margin: 0 0 8px;
+  }
+  h2.h {
+    font-size: clamp(22px, 2.6vw, 30px); font-weight: 800; margin: 0 0 14px; text-wrap: balance;
+  }
+  h3.sub { font-size: 18px; font-weight: 700; margin: 30px 0 10px; }
+  p { color: var(--ink-soft); max-width: 74ch; }
+  p.tight { max-width: 74ch; }
+  strong { color: var(--ink); }
+  a.inline { color: var(--accent-deep); }
+
+  ul.tick, ol.steps { padding-inline-start: 22px; color: var(--ink-soft); max-width: 74ch; }
+  ul.tick li, ol.steps li { margin: 6px 0; }
+  ol.steps { counter-reset: step; list-style: none; padding-inline-start: 0; }
+  ol.steps li {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 10px 0; border-top: 1px solid var(--line-soft);
+  }
+  ol.steps li:first-child { border-top: none; }
+  ol.steps li::before {
+    counter-increment: step; content: counter(step, decimal-leading-zero);
+    font-family: var(--font-mono); direction: ltr; color: var(--accent); font-size: 13px;
+    min-width: 22px; padding-top: 1px;
+  }
+
+  /* ---------- Cards / panels ---------- */
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); overflow: hidden; margin: 18px 0;
+  }
+  .card-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 16px; background: var(--paper-stripe); border-bottom: 1px solid var(--line);
+    font-family: var(--font-mono); direction: ltr; font-size: 12.5px; color: var(--ink-soft);
+  }
+  .card-body { padding: 16px; }
+  .card .scroll { overflow-x: auto; }
+
+  pre, code { font-family: var(--font-mono); }
+  pre.code {
+    direction: ltr; text-align: left; margin: 0; padding: 16px; background: var(--mono-bg); color: var(--mono-fg);
+    font-size: 13px; line-height: 1.7; overflow-x: auto; border-radius: 0 0 var(--radius) var(--radius);
+  }
+  pre.code .c { color: var(--mono-dim); }
+  code.tag {
+    direction: ltr; unicode-bidi: isolate; font-size: 0.86em; background: var(--paper-stripe);
+    border: 1px solid var(--line); padding: 1px 6px; border-radius: 5px; color: var(--accent-deep);
+  }
+
+  .mermaid-wrap { direction: ltr; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px; margin: 18px 0; overflow-x: auto; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  table caption { text-align: right; color: var(--ink-faint); font-size: 12.5px; padding-bottom: 8px; }
+  th, td { border-bottom: 1px solid var(--line-soft); padding: 9px 12px; text-align: right; vertical-align: top; }
+  thead th {
+    font-family: var(--font-mono); direction: ltr; text-align: right; font-size: 11.5px; letter-spacing: 0.04em;
+    color: var(--ink-faint); text-transform: uppercase; background: var(--paper-stripe);
+    border-bottom: 1px solid var(--line);
+  }
+  tbody tr:nth-child(even) { background: color-mix(in srgb, var(--paper-stripe) 55%, transparent); }
+  td.mono, th.mono { font-family: var(--font-mono); direction: ltr; text-align: left; font-variant-numeric: tabular-nums; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 760px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+
+  .tile {
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--card);
+    padding: 14px 16px; box-shadow: var(--shadow);
+  }
+  .tile h4 { margin: 0 0 6px; font-size: 14.5px; }
+  .tile p { margin: 0; font-size: 13.6px; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600;
+    padding: 3px 10px; border-radius: 999px; font-family: var(--font-mono); direction: ltr;
+  }
+  .pill.success { background: var(--success-soft); color: var(--success); }
+  .pill.warning { background: var(--warning-soft); color: var(--warning); }
+  .pill.critical { background: var(--critical-soft); color: var(--critical); }
+  .pill.neutral { background: var(--paper-stripe); color: var(--ink-soft); border: 1px solid var(--line); }
+
+  .workflow-chain { direction: ltr; display: flex; align-items: center; flex-wrap: wrap; gap: 0; margin: 20px 0; }
+  .workflow-chain .stamp {
+    font-family: var(--font-mono); font-size: 13px; font-weight: 700; padding: 8px 14px;
+    border: 1.5px solid var(--line); border-radius: 7px; background: var(--card); color: var(--ink-soft);
+  }
+  .workflow-chain .stamp.locked { border-color: var(--critical); color: var(--critical); background: var(--critical-soft); }
+  .workflow-chain .arrow { color: var(--ink-faint); padding: 0 10px; font-size: 15px; }
+
+  .callout {
+    border: 1px solid var(--line); border-inline-start: 4px solid var(--accent);
+    background: var(--accent-soft); border-radius: 8px; padding: 14px 18px; margin: 18px 0;
+  }
+  .callout.decision { border-inline-start-color: var(--critical); background: var(--critical-soft); }
+  .callout p { color: var(--ink); margin: 0; max-width: none; }
+  .callout .lbl { font-family: var(--font-mono); direction: ltr; font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-deep); margin-bottom: 6px; display: block; }
+  .callout.decision .lbl { color: var(--critical); }
+
+  hr.rule { border: none; border-top: 1px solid var(--line); margin: 28px 0; }
+
+  footer.end {
+    padding: 40px 8vw 80px; border-top: 1px solid var(--line); background: var(--paper-stripe);
+  }
+  footer.end p { max-width: 68ch; }
+
+  ::selection { background: var(--accent-soft); color: var(--ink); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .toc a { transition: background .12s ease, color .12s ease; }
+  }
+</style>
+
+<div class="doc">
+
+  <header class="cover">
+    <span class="cover-eyebrow">SEPTA · ERP-PAYROLL-ENGINE · v0.1-DRAFT</span>
+    <h1>طراحی معماری موتور حقوق و دستمزد قانون‌محور</h1>
+    <p class="lead">
+      یک Payroll Engine قانون‌محور (Rule-Based) در تراز SAP / Oracle / Dynamics — جایی که هیچ عدد، درصد، سقف یا فرمولی داخل کد نیست؛
+      همه‌چیز از دیتابیس خوانده می‌شود و با تغییر قانون سال بعد، حتی یک خط کد تغییر نمی‌کند.
+    </p>
+    <div class="cover-meta">
+      <span><b>وضعیت:</b> <span class="status-pill"><span class="dot"></span>DESIGN — در انتظار تأیید</span></span>
+      <span><b>فاز:</b> مستندسازی معماری (پیش از هرگونه پیاده‌سازی)</span>
+      <span><b>سبک:</b> Rule Engine + Formula Engine + Dependency Engine + Pipeline</span>
+      <span><b>زیرساخت میزبان:</b> NestJS · PostgreSQL/Prisma · React/Vite (هم‌راستا با سپتا)</span>
+    </div>
+  </header>
+
+  <div class="shell">
+    <nav class="toc" aria-label="فهرست بخش‌ها">
+      <div class="toc-title">Table of Contents</div>
+      <ol>
+        <li><a href="#s0">تصمیمات کلیدی معماری</a></li>
+        <li><a href="#s1">معماری سیستم</a></li>
+        <li><a href="#s2">ماژول‌ها و مسئولیت‌ها</a></li>
+        <li><a href="#s3">دیتابیس و Prisma Schema</a></li>
+        <li><a href="#s4">ER Diagram</a></li>
+        <li><a href="#s5">ساختار فولدرها</a></li>
+        <li><a href="#s6">Rule Engine</a></li>
+        <li><a href="#s7">Formula Engine</a></li>
+        <li><a href="#s8">Dependency Engine</a></li>
+        <li><a href="#s9">Pipeline محاسبات</a></li>
+        <li><a href="#s10">Insurance Engine</a></li>
+        <li><a href="#s11">Tax Engine</a></li>
+        <li><a href="#s12">Workflow</a></li>
+        <li><a href="#s13">Permission System</a></li>
+        <li><a href="#s14">طراحی API</a></li>
+        <li><a href="#s15">Frontend</a></li>
+        <li><a href="#s16">گزارش‌ها</a></li>
+        <li><a href="#s17">سناریوهای تست</a></li>
+        <li><a href="#s18">ریسک‌ها و آینده</a></li>
+        <li><a href="#s19">جمع‌بندی و تأیید</a></li>
+      </ol>
+    </nav>
+
+    <main class="content">
+
+      <!-- 0 -->
+      <section class="block" id="s0">
+        <p class="kicker">§00 · Alignment</p>
+        <h2 class="h">تصمیمات کلیدی معماری — قبل از هر چیز</h2>
+        <p>این موتور روی یک ERP زنده (سپتا) پیاده می‌شود که خودش قبلاً چند تصمیم معماری گرفته. به‌جای ساخت یک جزیره‌ی جدا، این طراحی عمداً از زیرساخت موجود استفاده می‌کند تا سیستم منسجم بماند.</p>
+        <div class="grid2">
+          <div class="tile">
+            <h4>♻️ RBAC از قبل وجود دارد</h4>
+            <p><code class="tag">permissions</code> / <code class="tag">permission_groups</code> در سپتا از قبل ساخته شده. نقش‌های HR Manager / Payroll Expert / Finance Manager / CEO / Viewer به‌صورت <b>گروه‌های دسترسی پیش‌فرض جدید</b> ساخته می‌شوند — نه یک سیستم نقش موازی.</p>
+          </div>
+          <div class="tile">
+            <h4>♻️ زیرساخت تولید سند از قبل وجود دارد</h4>
+            <p>ماژول <code class="tag">proposal-documents</code> (HTML→PDF با Puppeteer، Excel با ExcelJS، بارکد با bwip-js) دقیقاً همان چیزی است که فیش حقوقی نیاز دارد. پیشنهاد: تعمیم آن به یک <code class="tag">documents</code> module مشترک، نه بازسازی از صفر.</p>
+          </div>
+          <div class="tile">
+            <h4>⚠️ تداخل با جداول Payroll فعلی</h4>
+            <p>جداول ساده‌ی فعلی (<code class="tag">payroll_periods</code>, <code class="tag">payslips</code>) هاردکد و بدون نسخه‌بندی‌اند. این موتور آن‌ها را <b>جایگزین</b> می‌کند، نه تکمیل. جزئیات مسیر مهاجرت در §00-الف.</p>
+          </div>
+          <div class="tile">
+            <h4>⚠️ تداخل با کارکرد ماه (WorkLog)</h4>
+            <p>جداول <code class="tag">attendance_records</code>, <code class="tag">overtime_records</code>, <code class="tag">leave_requests</code>, <code class="tag">mission_requests</code> از قبل وجود دارند. <code class="tag">PayrollWorkLog</code> باید یک <b>Snapshot تجمیعی خودکار</b> از این‌ها باشد، نه ورود دستی موازی. جزئیات در §00-ب.</p>
+          </div>
+        </div>
+
+        <h3 class="sub">§00-الف — تصمیم مورد نیاز: سرنوشت payroll_periods / payslips فعلی</h3>
+        <div class="callout decision">
+          <span class="lbl">Decision Required</span>
+          <p>سه گزینه پیش‌روی شماست؛ توصیه‌ی من گزینه‌ی ۲ است:</p>
+        </div>
+        <table>
+          <thead><tr><th>گزینه</th><th>شرح</th><th>ریسک</th></tr></thead>
+          <tbody>
+            <tr><td><b>۱. موازی</b></td><td>جداول قدیمی دست‌نخورده می‌مانند و کاربر هر دو ماژول را می‌بیند.</td><td>دوگانگی داده، سردرگمی کاربر</td></tr>
+            <tr><td><b>۲. جایگزینی نرم (توصیه)</b></td><td>جداول قدیمی <b>Deprecated</b> می‌شوند (دقیقاً مثل الگوی خود پروژه در <code class="tag">shipment_documents</code> جایگزین ستون‌های تک‌فایلی قدیمی) — نه خوانده نه نوشته می‌شوند، فقط برای Rollback باقی می‌مانند. UI فعلی <code class="tag">PayrollPeriodsController</code> پشت یک Feature Flag به موتور جدید ری‌دایرکت می‌شود.</td><td>نیاز به یک اسکریپت مهاجرت یک‌باره برای داده‌های قبلی</td></tr>
+            <tr><td><b>۳. حذف</b></td><td>جداول قدیمی و کدشان کامل حذف شوند.</td><td>مغایر قاعده‌ی خود پروژه («Migration باید Rollback-پذیر باشد»)</td></tr>
+          </tbody>
+        </table>
+
+        <h3 class="sub">§00-ب — تصمیم مورد نیاز: منبع PayrollWorkLog</h3>
+        <p>پیشنهاد: <code class="tag">PayrollWorkLog</code> هر ماه به‌صورت خودکار از رکوردهای <b>تأییدشده‌ی</b> حضور/اضافه‌کار/مرخصی/مأموریت همان بازه Aggregate می‌شود (یک Job در ابتدای «باز کردن دوره»)، با یک دکمه‌ی «ثبت دستی/اصلاح» برای موارد استثنا. این از دوبار وارد کردن داده جلوگیری می‌کند و دو دامنه‌ی HR/Payroll را همگام نگه می‌دارد.</p>
+      </section>
+
+      <!-- 1 -->
+      <section class="block" id="s1">
+        <p class="kicker">§01 · System Architecture</p>
+        <h2 class="h">معماری سیستم</h2>
+        <p>معماری Layered + Pipeline: کنترلرها فقط HTTP را ترجمه می‌کنند، سرویس‌ها فقط orchestration انجام می‌دهند، و <b>تمام محاسبات</b> داخل Engine‌ها و Pipeline Stage‌ها اتفاق می‌افتد. هیچ Business Logic در Controller/Service نیست.</p>
+
+        <div class="mermaid-wrap">
+<pre class="mermaid">
+graph TB
+  subgraph CLIENT["Frontend — React"]
+    UI1[Payroll Config Page]
+    UI2[WorkLog Page]
+    UI3[Payroll Run Page]
+    UI4[Payslip Viewer]
+    UI5[Reports Page]
+  end
+
+  subgraph API["API Layer — NestJS Controllers"]
+    C1[Rules/Formulas/Components Controller]
+    C2[WorkLog Controller]
+    C3[Payroll Run Controller]
+    C4[Results / Workflow Controller]
+    C5[Reports Controller]
+  end
+
+  subgraph SVC["Orchestration Services (no math)"]
+    S1[PayrollRulesService]
+    S2[PayrollWorkLogService]
+    S3[PayrollRunService]
+    S4[PayrollWorkflowService]
+    S5[PayrollReportsService]
+  end
+
+  subgraph CORE["Payroll Core — Engines (all math lives here)"]
+    RE[Rule Engine]
+    FE[Formula Engine]
+    DE[Dependency Engine]
+    PROC[Payroll Processor]
+    CALC[Payroll Calculator]
+    INS[Insurance Engine]
+    TAX[Tax Engine]
+  end
+
+  subgraph DATA["Repositories + Prisma"]
+    REPO[(Repository Layer)]
+    PG[(PostgreSQL)]
+  end
+
+  subgraph EXT["Integrations"]
+    ACC[Accounting Integration Interface]
+    DOC[Shared Documents Module — PDF/Excel/Barcode]
+    HR[(HR Domain — attendance / leave / overtime / mission)]
+  end
+
+  UI1 --> C1 --> S1 --> RE --> REPO
+  UI2 --> C2 --> S2 --> HR
+  S2 --> REPO
+  UI3 --> C3 --> S3 --> PROC
+  PROC --> RE
+  PROC --> FE
+  FE --> DE
+  PROC --> CALC --> INS
+  CALC --> TAX
+  PROC --> REPO
+  UI4 --> C4 --> S4 --> REPO
+  S4 --> ACC
+  UI5 --> C5 --> S5 --> REPO
+  S5 --> DOC
+  C4 --> DOC
+  REPO --> PG
+</pre>
+        </div>
+
+        <ul class="tick">
+          <li><b>هیچ محاسبه‌ای در Controller/Service نیست</b> — سرویس‌ها فقط بار را از Repository می‌گیرند و به Engine مربوطه تحویل می‌دهند.</li>
+          <li><b>Engine‌ها Stateless و Pure هستند</b> — ورودی می‌گیرند، خروجی برمی‌گردانند؛ بدون side-effect پنهان، تست‌پذیر با Unit Test ساده.</li>
+          <li><b>Repository Pattern</b> بین Prisma و Service قرار می‌گیرد — سرویس‌ها هیچ‌وقت مستقیم <code class="tag">prisma.xxx.findMany</code> صدا نمی‌زنند.</li>
+          <li><b>Accounting Integration فقط از طریق Interface</b> — هیچ وابستگی مستقیمی به نرم‌افزار حسابداری خاصی وجود ندارد (رجوع به §01 پایین).</li>
+        </ul>
+      </section>
+
+      <!-- 2 -->
+      <section class="block" id="s2">
+        <p class="kicker">§02 · Modules</p>
+        <h2 class="h">ماژول‌ها و مسئولیت هرکدام</h2>
+        <div class="card">
+          <div class="card-head"><span>module ownership map</span><span>8 core + 3 support</span></div>
+          <div class="card-body scroll">
+            <table>
+              <thead><tr><th>ماژول</th><th>مسئولیت</th><th>مسئولیت ندارد</th></tr></thead>
+              <tbody>
+                <tr><td><b>Rule Engine</b></td><td>بارگذاری قوانین معتبر بر اساس سال/نسخه/تاریخ اجرا</td><td>محاسبه‌ی فرمول؛ فقط داده‌ی خام قانون را می‌دهد</td></tr>
+                <tr><td><b>Formula Engine</b></td><td>Parse و Evaluate امن عبارات ریاضی/شرطی ذخیره‌شده در DB</td><td>دانستن این‌که کدام Component چه ترتیبی دارد</td></tr>
+                <tr><td><b>Dependency Engine</b></td><td>ساخت گراف وابستگی Component‌ها، تشخیص چرخه، تعیین ترتیب محاسبه</td><td>خودِ ارزیابی فرمول</td></tr>
+                <tr><td><b>Payroll Processor</b></td><td>اجرای Pipeline ۱۲ مرحله‌ای برای هر (کارمند × دوره)، مدیریت تراکنش و Batch</td><td>فرمول‌نویسی یا قوانین بیمه/مالیات</td></tr>
+                <tr><td><b>Payroll Calculator</b></td><td>مونتاژ اجزای درآمد/کسور طبق ترتیب Dependency Engine و جمع‌بندی</td><td>نرخ بیمه/مالیات (این‌ها Engine جدا دارند)</td></tr>
+                <tr><td><b>Insurance Engine</b></td><td>محاسبه‌ی سهم بیمه کارگر/کارفرما/بیکاری از روی Rule</td><td>مالیات، کسورات دیگر</td></tr>
+                <tr><td><b>Tax Engine</b></td><td>مالیات پلکانی از روی PayrollTaxBracket + معافیت</td><td>بیمه</td></tr>
+                <tr><td><b>Accounting Integration</b></td><td>تبدیل PayrollResult تأییدشده به سند حسابداری استاندارد و صدور از طریق Interface</td><td>اتصال مستقیم به هیچ نرم‌افزار خاصی</td></tr>
+                <tr><td><b>Reporting Engine</b></td><td>تجمیع PayrollResult/WorkLog به ۱۲ نوع گزارش + خروجی PDF/Excel</td><td>محاسبه‌ی مجدد حقوق (فقط می‌خواند)</td></tr>
+                <tr><td><b>Workflow Service</b></td><td>گارد انتقال بین ۶ وضعیت + ثبت Audit هر انتقال</td><td>محاسبات مالی</td></tr>
+                <tr><td><b>Permission Layer</b></td><td>اعمال RBAC موجود سپتا روی هر Endpoint این ماژول</td><td>تعریف نقش جدید یا جدول کاربر جدید</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3 -->
+      <section class="block" id="s3">
+        <p class="kicker">§03 · Database</p>
+        <h2 class="h">طراحی دیتابیس و Prisma Schema</h2>
+        <p>همه‌ی جدول‌ها از الگوی سپتا پیروی می‌کنند: PK از نوع UUID (<code class="tag">gen_random_uuid()</code>)، نام‌گذاری snake_case در دیتابیس، و <code class="tag">created_at</code> روی جدول‌های اصلی. نسخه‌بندی (<code class="tag">PayrollRuleVersion</code>) ستون فقرات کل طراحی است.</p>
+
+        <div class="card">
+          <div class="card-head"><span>prisma/schema.prisma — payroll domain</span><span class="pill neutral">13 models</span></div>
+          <pre class="code">model PayrollYear {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  yearNumber   Int      @unique @map("year_number")
+  calendarType String   @default("jalali") @map("calendar_type") <span class="c">// jalali | gregorian</span>
+  status       String   @default("open")  <span class="c">// open | closed</span>
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  ruleVersions PayrollRuleVersion[]
+  periods      PayrollPeriod[]
+
+  @@map("payroll_years")
+}
+
+model PayrollRuleVersion {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payrollYearId String    @map("payroll_year_id") @db.Uuid
+  versionNumber Int       @map("version_number")
+  title         String                                  <span class="c">// "1406 Version 1"</span>
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+  status        String    @default("draft") <span class="c">// draft | active | superseded</span>
+  createdById   String?   @map("created_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  payrollYear PayrollYear         @relation(fields: [payrollYearId], references: [id])
+  rules       PayrollRule[]
+  brackets    PayrollTaxBracket[]
+  formulas    Formula[]
+  periods     PayrollPeriod[]
+
+  @@unique([payrollYearId, versionNumber])
+  @@map("payroll_rule_versions")
+}
+
+model PayrollRule {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ruleVersionId String    @map("rule_version_id") @db.Uuid
+  code          String    <span class="c">// MIN_WAGE, HOUSING_ALLOWANCE, INSURANCE_RATE_EMPLOYEE, INSURANCE_CEILING, ...</span>
+  title         String
+  valueType     String    @map("value_type") <span class="c">// number | percent | boolean</span>
+  value         Decimal   @db.Decimal(18, 4)
+  effectiveDate DateTime  @map("effective_date") @db.Date
+  expireDate    DateTime? @map("expire_date") @db.Date
+  description   String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  ruleVersion PayrollRuleVersion @relation(fields: [ruleVersionId], references: [id])
+
+  @@unique([ruleVersionId, code])
+  @@map("payroll_rules")
+}
+
+<span class="c">// پله‌های مالیات پلکانی — چون ذاتاً چندردیفی است، در قالب Rule عمومی جا نمی‌شود</span>
+model PayrollTaxBracket {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ruleVersionId String   @map("rule_version_id") @db.Uuid
+  bracketOrder  Int      @map("bracket_order")
+  fromAmount    Decimal  @map("from_amount") @db.Decimal(18, 4)
+  toAmount      Decimal? @map("to_amount") @db.Decimal(18, 4) <span class="c">// null = آخرین پله، بدون سقف</span>
+  ratePercent   Decimal  @map("rate_percent") @db.Decimal(5, 2)
+
+  ruleVersion PayrollRuleVersion @relation(fields: [ruleVersionId], references: [id])
+
+  @@unique([ruleVersionId, bracketOrder])
+  @@map("payroll_tax_brackets")
+}
+
+model Formula {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ruleVersionId String   @map("rule_version_id") @db.Uuid
+  code          String
+  expression    String   @db.Text  <span class="c">// "BASE + HOUSE + FOOD" یا "IF(CHILDREN>0, CHILDREN*CHILD_ALLOWANCE, 0)"</span>
+  description   String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  ruleVersion PayrollRuleVersion @relation(fields: [ruleVersionId], references: [id])
+  components  PayrollComponent[]
+
+  @@unique([ruleVersionId, code])
+  @@map("payroll_formulas")
+}
+
+model PayrollComponent {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code          String   @unique <span class="c">// BASE, HOUSE, FOOD, CHILD, SENIORITY, OVERTIME, NIGHT, HOLIDAY, BONUS, INSURANCE, TAX, LOAN, ADVANCE, OTHER</span>
+  title         String
+  componentType String   @map("component_type") <span class="c">// earning | deduction</span>
+  isInsurable   Boolean  @default(false) @map("is_insurable")
+  isTaxable     Boolean  @default(false) @map("is_taxable")
+  calcOrder     Int      @default(0) @map("calc_order") <span class="c">// راهنمای نمایش؛ ترتیب واقعی از Dependency Engine می‌آید</span>
+  formulaId     String?  @map("formula_id") @db.Uuid
+  status        String   @default("active")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  formula     Formula?            @relation(fields: [formulaId], references: [id])
+  resultItems PayrollResultItem[]
+
+  @@map("payroll_components")
+}
+
+<span class="c">// عمداً باریک نگه داشته شده — base_salary از employee_contracts، bank/national-id از employees خوانده می‌شود</span>
+model EmployeePayrollProfile {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId           String    @unique @map("employee_id") @db.Uuid
+  seniorityBaseDate     DateTime? @map("seniority_base_date") @db.Date
+  childrenCount         Int       @default(0) @map("children_count")
+  insuranceNumber       String?   @map("insurance_number")
+  costCenterDeptId      String?   @map("cost_center_dept_id") @db.Uuid <span class="c">// FK به departments موجود</span>
+  defaultRuleVersionId  String?   @map("default_rule_version_id") @db.Uuid
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@map("employee_payroll_profiles")
+}
+
+model PayrollPeriod {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payrollYearId String   @map("payroll_year_id") @db.Uuid
+  periodCode    String   @unique @map("period_code") <span class="c">// "1406-01"</span>
+  monthNumber   Int      @map("month_number")
+  ruleVersionId String   @map("rule_version_id") @db.Uuid <span class="c">// کدام نسخه‌ی قانون برای این ماه معتبر است</span>
+  status        String   @default("open") <span class="c">// open | closed</span>
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  payrollYear PayrollYear        @relation(fields: [payrollYearId], references: [id])
+  ruleVersion PayrollRuleVersion @relation(fields: [ruleVersionId], references: [id])
+  workLogs    PayrollWorkLog[]
+  results     PayrollResult[]
+
+  @@map("payroll_periods_v2") <span class="c">// نام‌گذاری متفاوت از جدول قدیمی — رجوع به §00-الف</span>
+}
+
+model PayrollWorkLog {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payrollPeriodId   String   @map("payroll_period_id") @db.Uuid
+  employeeId        String   @map("employee_id") @db.Uuid
+  workedDays        Decimal  @default(0) @map("worked_days") @db.Decimal(5, 2)
+  overtimeHours     Decimal  @default(0) @map("overtime_hours") @db.Decimal(6, 2)
+  nightHours        Decimal  @default(0) @map("night_hours") @db.Decimal(6, 2)
+  fridayHours       Decimal  @default(0) @map("friday_hours") @db.Decimal(6, 2)
+  holidayHours      Decimal  @default(0) @map("holiday_hours") @db.Decimal(6, 2)
+  missionDays       Decimal  @default(0) @map("mission_days") @db.Decimal(5, 2)
+  leaveDays         Decimal  @default(0) @map("leave_days") @db.Decimal(5, 2)
+  absenceDays       Decimal  @default(0) @map("absence_days") @db.Decimal(5, 2)
+  latenessMinutes   Int      @default(0) @map("lateness_minutes")
+  earlyLeaveMinutes Int      @default(0) @map("early_leave_minutes")
+  requiredHours     Decimal  @default(0) @map("required_hours") @db.Decimal(6, 2)
+  workedHours       Decimal  @default(0) @map("worked_hours") @db.Decimal(6, 2)
+  source            String   @default("auto_aggregated") <span class="c">// auto_aggregated | manual — رجوع §00-ب</span>
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  payrollPeriod PayrollPeriod @relation(fields: [payrollPeriodId], references: [id])
+
+  @@unique([payrollPeriodId, employeeId])
+  @@map("payroll_work_logs")
+}
+
+model PayrollResult {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payrollPeriodId        String    @map("payroll_period_id") @db.Uuid
+  employeeId             String    @map("employee_id") @db.Uuid
+  status                 String    @default("draft") <span class="c">// draft|calculated|reviewed|approved|posted|locked</span>
+  grossEarnings          Decimal   @default(0) @map("gross_earnings") @db.Decimal(18, 4)
+  totalDeductions        Decimal   @default(0) @map("total_deductions") @db.Decimal(18, 4)
+  insuranceEmployeeShare Decimal   @default(0) @map("insurance_employee_share") @db.Decimal(18, 4)
+  insuranceEmployerShare Decimal   @default(0) @map("insurance_employer_share") @db.Decimal(18, 4)
+  unemploymentInsurance  Decimal   @default(0) @map("unemployment_insurance") @db.Decimal(18, 4)
+  taxAmount              Decimal   @default(0) @map("tax_amount") @db.Decimal(18, 4)
+  netSalary              Decimal   @default(0) @map("net_salary") @db.Decimal(18, 4)
+  employerCost           Decimal   @default(0) @map("employer_cost") @db.Decimal(18, 4)
+  calculatedAt DateTime? @map("calculated_at")   calculatedBy String? @map("calculated_by") @db.Uuid
+  reviewedAt   DateTime? @map("reviewed_at")     reviewedBy   String? @map("reviewed_by") @db.Uuid
+  approvedAt   DateTime? @map("approved_at")     approvedBy   String? @map("approved_by") @db.Uuid
+  postedAt     DateTime? @map("posted_at")       postedBy     String? @map("posted_by") @db.Uuid
+  lockedAt     DateTime? @map("locked_at")       lockedBy     String? @map("locked_by") @db.Uuid
+  createdAt              DateTime  @default(now()) @map("created_at")
+
+  payrollPeriod PayrollPeriod       @relation(fields: [payrollPeriodId], references: [id])
+  items         PayrollResultItem[]
+
+  @@unique([payrollPeriodId, employeeId])
+  @@map("payroll_results")
+}
+
+<span class="c">// هر ردیف یک Snapshot است — حتی اگر بعداً عنوان Component یا متن فرمول عوض شود، تاریخچه دست‌نخورده می‌ماند</span>
+model PayrollResultItem {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payrollResultId String   @map("payroll_result_id") @db.Uuid
+  componentId     String   @map("component_id") @db.Uuid
+  componentCode   String   @map("component_code")
+  amount          Decimal  @db.Decimal(18, 4)
+  calcOrder       Int      @map("calc_order")
+  formulaSnapshot String?  @map("formula_snapshot") @db.Text
+
+  payrollResult PayrollResult    @relation(fields: [payrollResultId], references: [id], onDelete: Cascade)
+  component     PayrollComponent @relation(fields: [componentId], references: [id])
+
+  @@map("payroll_result_items")
+}
+
+model PayrollAuditLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id") @db.Uuid
+  action      String   <span class="c">// created | updated | deleted | status_changed</span>
+  fieldName   String?  @map("field_name")
+  oldValue    String?  @map("old_value")
+  newValue    String?  @map("new_value")
+  performedBy String   @map("performed_by") @db.Uuid
+  performedAt DateTime @default(now()) @map("performed_at")
+
+  @@index([entityType, entityId])
+  @@map("payroll_audit_log")
+}</pre>
+        </div>
+
+        <h3 class="sub">استفاده‌ی مجدد آگاهانه از جداول موجود</h3>
+        <table>
+          <thead><tr><th>نیاز</th><th>به‌جای ساخت جدول جدید…</th><th>از این استفاده کن</th></tr></thead>
+          <tbody>
+            <tr><td>حقوق پایه، نوع قرارداد</td><td>PayrollBaseSalary</td><td><code class="tag">employee_contracts.base_salary/currency</code></td></tr>
+            <tr><td>وضعیت تأهل</td><td>ستون تکراری</td><td><code class="tag">employees.marital_status</code></td></tr>
+            <tr><td>شماره حساب/بانک</td><td>ستون تکراری</td><td><code class="tag">employees.bank_account_number/bank_name</code></td></tr>
+            <tr><td>سمت، محل خدمت</td><td>ستون تکراری</td><td><code class="tag">employees.position_title</code> / <code class="tag">employee_contracts.work_location</code></td></tr>
+            <tr><td>مرکز هزینه</td><td>جدول CostCenter</td><td><code class="tag">departments</code> (درختی، از قبل per-entity)</td></tr>
+            <tr><td>گزارش شعبه</td><td>جدول Branch</td><td><code class="tag">our_entities</code></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- 4 -->
+      <section class="block" id="s4">
+        <p class="kicker">§04 · ER Diagram</p>
+        <h2 class="h">نمودار ارتباط جداول</h2>
+        <div class="mermaid-wrap">
+<pre class="mermaid">
+erDiagram
+  PayrollYear ||--o{ PayrollRuleVersion : has
+  PayrollYear ||--o{ PayrollPeriod : has
+  PayrollRuleVersion ||--o{ PayrollRule : defines
+  PayrollRuleVersion ||--o{ PayrollTaxBracket : defines
+  PayrollRuleVersion ||--o{ Formula : defines
+  PayrollRuleVersion ||--o{ PayrollPeriod : "applies to"
+  Formula ||--o{ PayrollComponent : "used by"
+  PayrollComponent ||--o{ PayrollResultItem : "produces"
+  PayrollPeriod ||--o{ PayrollWorkLog : contains
+  PayrollPeriod ||--o{ PayrollResult : contains
+  PayrollResult ||--o{ PayrollResultItem : "breaks down into"
+  Employees ||--|| EmployeePayrollProfile : has
+  Employees ||--o{ PayrollWorkLog : "logged for"
+  Employees ||--o{ PayrollResult : "calculated for"
+  Departments ||--o{ EmployeePayrollProfile : "cost center"
+</pre>
+        </div>
+      </section>
+
+      <!-- 5 -->
+      <section class="block" id="s5">
+        <p class="kicker">§05 · Folder Structure</p>
+        <h2 class="h">ساختار فولدرها</h2>
+        <div class="grid2">
+          <div class="card">
+            <div class="card-head"><span>apps/api/src/payroll/</span><span class="pill neutral">NestJS</span></div>
+            <pre class="code">payroll/
+├── payroll.module.ts
+├── controllers/
+│   ├── payroll-rules.controller.ts
+│   ├── payroll-formulas.controller.ts
+│   ├── payroll-components.controller.ts
+│   ├── payroll-periods.controller.ts
+│   ├── payroll-worklogs.controller.ts
+│   ├── payroll-run.controller.ts
+│   ├── payroll-results.controller.ts
+│   └── payroll-reports.controller.ts
+├── services/                      <span class="c">// فقط orchestration</span>
+│   ├── payroll-rules.service.ts
+│   ├── payroll-worklog-aggregation.service.ts
+│   ├── payroll-run.service.ts
+│   ├── payroll-workflow.service.ts
+│   └── payroll-reports.service.ts
+├── repositories/                  <span class="c">// Repository Pattern روی Prisma</span>
+│   ├── payroll-rule.repository.ts
+│   ├── formula.repository.ts
+│   ├── payroll-result.repository.ts
+│   └── ...
+├── engines/
+│   ├── rule-engine/
+│   │   ├── rule-engine.service.ts
+│   │   └── rule-loader.ts
+│   ├── formula-engine/
+│   │   ├── lexer.ts
+│   │   ├── parser.ts
+│   │   ├── ast.ts
+│   │   ├── evaluator.ts
+│   │   └── formula-engine.service.ts
+│   ├── dependency-engine/
+│   │   ├── dependency-graph.ts
+│   │   ├── topological-sort.ts
+│   │   └── dependency-engine.service.ts
+│   ├── insurance-engine/
+│   │   └── insurance-engine.service.ts
+│   ├── tax-engine/
+│   │   └── tax-engine.service.ts
+│   └── accounting-integration/
+│       ├── accounting-export.interface.ts
+│       └── accounting-export.service.ts
+├── pipeline/
+│   ├── payroll-processor.service.ts
+│   ├── pipeline-context.ts
+│   ├── pipeline-stage.interface.ts
+│   └── stages/
+│       ├── 01-load-rules.stage.ts
+│       ├── 02-load-employee.stage.ts
+│       ├── 03-load-worklog.stage.ts
+│       ├── 04-evaluate-components.stage.ts
+│       ├── 05-calculate-earnings.stage.ts
+│       ├── 06-calculate-insurance-base.stage.ts
+│       ├── 07-insurance.stage.ts
+│       ├── 08-calculate-taxable-income.stage.ts
+│       ├── 09-tax.stage.ts
+│       ├── 10-other-deductions.stage.ts
+│       ├── 11-net-salary.stage.ts
+│       ├── 12-employer-cost.stage.ts
+│       └── 13-store-result.stage.ts
+├── dto/
+└── types/
+    └── payroll.types.ts</pre>
+          </div>
+          <div class="card">
+            <div class="card-head"><span>apps/web/src/pages/payroll/</span><span class="pill neutral">React</span></div>
+            <pre class="code">payroll/
+├── PayrollConfigPage.tsx      <span class="c">// نسخه/قوانین/فرمول/اجزا</span>
+├── PayrollWorkLogPage.tsx     <span class="c">// کارکرد ماه + Sync از HR</span>
+├── PayrollRunPage.tsx         <span class="c">// اجرا + جدول نتایج + Workflow</span>
+├── PayslipViewer.tsx          <span class="c">// فیش تکی، در Run و Self-Service</span>
+├── PayrollReportsPage.tsx
+├── components/
+│   ├── DependencyGraphView.tsx
+│   ├── WorkflowStamp.tsx
+│   └── FormulaEditor.tsx
+├── payroll-api.ts             <span class="c">// react-query hooks</span>
+└── payroll-types.ts</pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6 -->
+      <section class="block" id="s6">
+        <p class="kicker">§06 · Rule Engine</p>
+        <h2 class="h">طراحی Rule Engine</h2>
+        <p>مسئولیت این Engine فقط <b>بارگذاری</b> است، نه محاسبه. ورودی: سال + تاریخ اجرا (یا شناسه‌ی نسخه‌ی مستقیم). خروجی: نقشه‌ای از <code class="tag">code → value</code> که بقیه‌ی Engine‌ها مصرف می‌کنند.</p>
+        <pre class="code">interface RuleSet {
+  ruleVersionId: string;
+  values: Record&lt;string, number&gt;;      <span class="c">// MIN_WAGE -> 7113000000</span>
+  brackets: TaxBracket[];
+}
+
+class RuleLoader {
+  <span class="c">// یک نسخه‌ی فعال دقیقاً برای هر بازه‌ی زمانی وجود دارد؛ همپوشانی effectiveFrom/effectiveTo رد می‌شود</span>
+  async loadByPeriod(periodId: string): Promise&lt;RuleSet&gt;
+  async loadByVersion(ruleVersionId: string): Promise&lt;RuleSet&gt;
+  async loadByDate(entityCalendarType: 'jalali'|'gregorian', date: Date): Promise&lt;RuleSet&gt;
+}</pre>
+        <ul class="tick">
+          <li>نتیجه‌ی بارگذاری Cache می‌شود (کلید = ruleVersionId) — چون یک نسخه پس از استفاده در هر دوره‌ی «بسته‌شده» عملاً Immutable است.</li>
+          <li>اگر برای یک تاریخ هیچ نسخه‌ی فعالی پیدا نشود → خطای صریح <code class="tag">NoActiveRuleVersionError</code>، نه مقدار پیش‌فرض ساکت.</li>
+        </ul>
+      </section>
+
+      <!-- 7 -->
+      <section class="block" id="s7">
+        <p class="kicker">§07 · Formula Engine</p>
+        <h2 class="h">طراحی Formula Engine — بدون eval</h2>
+        <p>یک Recursive-Descent Parser دستی که متن فرمول را به AST تبدیل می‌کند، سپس یک Evaluator جدا AST را با یک Context اجرا می‌کند. هیچ‌جا از <code class="tag">eval</code> یا <code class="tag">new Function</code> استفاده نمی‌شود.</p>
+
+        <h3 class="sub">گرامر (EBNF)</h3>
+        <pre class="code">expression   := logicalOr
+logicalOr    := logicalAnd ( "OR" logicalAnd )*
+logicalAnd   := comparison ( "AND" comparison )*
+comparison   := additive ( ("=="|"!="|">"|">="|"&lt;"|"&lt;=") additive )?
+additive     := multiplicative ( ("+"|"-") multiplicative )*
+multiplicative := unary ( ("*"|"/"|"%") unary )*
+unary        := ("-"|"!")? primary
+primary      := NUMBER | IDENTIFIER | call | "(" expression ")"
+call         := IDENTIFIER "(" ( expression ("," expression)* )? ")"
+
+<span class="c">// توابع پیش‌ساخته: IF(cond,then,else) MIN(...) MAX(...) ROUND(v,d?) FLOOR(v) CEIL(v) ABS(v) PERCENT(v,p)</span></pre>
+
+        <h3 class="sub">AST + Evaluator (Type-Safe)</h3>
+        <pre class="code">type FormulaNode =
+  | { kind: 'number'; value: number }
+  | { kind: 'identifier'; name: string }
+  | { kind: 'binary'; op: '+'|'-'|'*'|'/'|'%'; left: FormulaNode; right: FormulaNode }
+  | { kind: 'unary'; op: '-'|'!'; operand: FormulaNode }
+  | { kind: 'compare'; op: '=='|'!='|'>'|'>='|'&lt;'|'&lt;='; left: FormulaNode; right: FormulaNode }
+  | { kind: 'logical'; op: 'AND'|'OR'; left: FormulaNode; right: FormulaNode }
+  | { kind: 'call'; name: string; args: FormulaNode[] };
+
+class FormulaParser {
+  parse(expression: string): FormulaNode { <span class="c">/* لغزش + پارس + گزارش خطا با ستون دقیق */</span> }
+}
+
+class FormulaEvaluator {
+  evaluate(node: FormulaNode, ctx: Readonly&lt;Record&lt;string, number | boolean&gt;&gt;): number | boolean {
+    <span class="c">// walk بازگشتی؛ IDENTIFIER ناموجود => FormulaEvaluationError با نام فرمول + شناسه</span>
+  }
+}
+
+class FormulaEngineService {
+  private cache = new Map&lt;string, FormulaNode&gt;(); <span class="c">// key = formulaId</span>
+  parseAndCache(formula: Formula): FormulaNode
+  extractDependencies(node: FormulaNode): string[]  <span class="c">// برای Dependency Engine</span>
+}</pre>
+        <ul class="tick">
+          <li><b>امنیت:</b> Parser فقط دستور زبان بالا را می‌شناسد؛ هیچ دسترسی به Global Scope، فایل‌سیستم یا شبکه ندارد.</li>
+          <li><b>خطای واضح:</b> هر خطای Parse شامل موقعیت دقیق کاراکتر در متن فرمول است تا در UI ادمین قابل هایلایت باشد.</li>
+        </ul>
+      </section>
+
+      <!-- 8 -->
+      <section class="block" id="s8">
+        <p class="kicker">§08 · Dependency Engine</p>
+        <h2 class="h">طراحی Dependency Engine</h2>
+        <p>هر Component که فرمول دارد، یک گره است. یال‌ها از <code class="tag">extractDependencies()</code> فرمول همان Component ساخته می‌شوند. مرتب‌سازی توپولوژیک (Kahn) ترتیب واقعی محاسبه را تعیین می‌کند — کاربر هیچ‌وقت مجبور نیست ترتیب را دستی تنظیم کند.</p>
+        <div class="mermaid-wrap">
+<pre class="mermaid">
+graph LR
+  CHILDREN["CHILDREN (WorkLog/Profile — ورودی برگ)"] --> CHILD["CHILD"]
+  BASE["BASE"] --> HOUSE["HOUSE"]
+  BASE --> SENIORITY["SENIORITY"]
+  BASE --> GROSS["GROSS = BASE+HOUSE+FOOD+CHILD+SENIORITY"]
+  HOUSE --> GROSS
+  CHILD --> GROSS
+  SENIORITY --> GROSS
+  FOOD["FOOD"] --> GROSS
+  GROSS --> INSBASE["Insurance Base"]
+  INSBASE --> INS["Insurance Engine"]
+  GROSS --> TAXABLE["Taxable Income"]
+  INS --> TAXABLE
+  TAXABLE --> TAXE["Tax Engine"]
+  GROSS --> NET["Net Salary"]
+  INS --> NET
+  TAXE --> NET
+</pre>
+        </div>
+        <pre class="code">class DependencyGraph {
+  addNode(code: string): void
+  addEdge(from: string, to: string): void        <span class="c">// from به to وابسته است</span>
+  topologicalOrder(): string[]                    <span class="c">// Kahn's algorithm</span>
+  detectCycle(): string[] | null                   <span class="c">// DFS روی گره‌های باقی‌مانده؛ مسیر کامل چرخه برمی‌گرداند</span>
+}
+
+class DependencyEngineService {
+  buildGraph(components: PayrollComponent[], formulas: Map&lt;string, FormulaNode&gt;): DependencyGraph
+  resolveOrder(ruleVersionId: string): string[] {
+    <span class="c">// Cache شده به‌ازای ruleVersionId؛ اگر چرخه پیدا شود، خطای</span>
+    <span class="c">// CircularDependencyError با مسیر کامل (مثلاً "CHILD → BONUS → CHILD") پرتاب می‌شود</span>
+  }
+}</pre>
+      </section>
+
+      <!-- 9 -->
+      <section class="block" id="s9">
+        <p class="kicker">§09 · Calculation Pipeline</p>
+        <h2 class="h">Pipeline محاسبات — دقیقاً ۱۲ مرحله</h2>
+        <div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart TD
+  A[1. Load Rules] --> B[2. Load Employee]
+  B --> C[3. Load WorkLog]
+  C --> D[4. Evaluate Components]
+  D --> E[5. Calculate Earnings]
+  E --> F[6. Calculate Insurance Base]
+  F --> G[7. Insurance Engine]
+  G --> H[8. Calculate Taxable Income]
+  H --> I[9. Tax Engine]
+  I --> J[10. Other Deductions]
+  J --> K[11. Net Salary]
+  K --> L[12. Employer Cost]
+  L --> M[13. Store Result]
+</pre>
+        </div>
+        <p>هر مرحله یک کلاس تزریق‌پذیر با یک قرارداد یکسان است؛ <code class="tag">PayrollProcessor</code> آن‌ها را به‌ترتیب اجرا می‌کند و کل زنجیره را در یک تراکنش Prisma می‌بندد (اگر مرحله‌ای شکست بخورد، هیچ نتیجه‌ای ذخیره نمی‌شود).</p>
+        <pre class="code">interface PayrollPipelineStage {
+  readonly name: string;
+  execute(ctx: PayrollContext): Promise&lt;PayrollContext&gt;;
+}
+
+interface PayrollContext {
+  periodId: string; employeeId: string;
+  rules?: RuleSet; employee?: EmployeeSnapshot; workLog?: PayrollWorkLog;
+  componentValues?: Record&lt;string, number&gt;;
+  grossEarnings?: number; insuranceBase?: number;
+  insurance?: InsuranceResult; taxableIncome?: number; taxAmount?: number;
+  otherDeductions?: number; netSalary?: number; employerCost?: number;
+  errors: PipelineError[];
+}
+
+@Injectable()
+class PayrollProcessor {
+  constructor(private stages: PayrollPipelineStage[] /* DI-ordered */) {}
+  async run(periodId: string, employeeId: string): Promise&lt;PayrollResult&gt; {
+    let ctx: PayrollContext = { periodId, employeeId, errors: [] };
+    for (const stage of this.stages) ctx = await stage.execute(ctx);
+    if (ctx.errors.length) throw new PayrollCalculationError(ctx.errors);
+    return ctx as Required&lt;PayrollContext&gt; as unknown as PayrollResult;
+  }
+  async runBatch(periodId: string, employeeIds: string[]): Promise&lt;BatchResult&gt; {
+    <span class="c">// اجرای موازی محدود (p-limit) + گزارش موفق/ناموفق per employee، بدون قطع کل batch با یک خطا</span>
+  }
+}</pre>
+      </section>
+
+      <!-- 10 -->
+      <section class="block" id="s10">
+        <p class="kicker">§10 · Insurance Engine</p>
+        <h2 class="h">طراحی Insurance Engine</h2>
+        <pre class="code">interface InsuranceResult {
+  employeeShare: number; employerShare: number; unemploymentShare: number; total: number;
+  insuranceBase: number; <span class="c">// بعد از اعمال سقف</span>
+}
+
+class InsuranceEngineService {
+  calculate(insurableBase: number, rules: RuleSet): InsuranceResult {
+    const base = Math.min(insurableBase, rules.values['INSURANCE_CEILING']);
+    const employeeShare = base * rules.values['INSURANCE_RATE_EMPLOYEE'] / 100;
+    const employerShare = base * rules.values['INSURANCE_RATE_EMPLOYER'] / 100;
+    const unemploymentShare = base * rules.values['UNEMPLOYMENT_RATE'] / 100;
+    return { employeeShare, employerShare, unemploymentShare, total: employeeShare+employerShare+unemploymentShare, insuranceBase: base };
+  }
+}</pre>
+        <p>ورودی مبنای بیمه = مجموع Component‌هایی که <code class="tag">isInsurable=true</code> دارند (از خروجی مرحله‌ی ۵). تمام نرخ‌ها و سقف از <code class="tag">RuleSet</code> می‌آیند — تغییر سالانه فقط یعنی رکورد جدید در <code class="tag">PayrollRule</code>.</p>
+      </section>
+
+      <!-- 11 -->
+      <section class="block" id="s11">
+        <p class="kicker">§11 · Tax Engine</p>
+        <h2 class="h">طراحی Tax Engine — مالیات پلکانی</h2>
+        <pre class="code">class TaxEngineService {
+  calculate(taxableIncome: number, rules: RuleSet): number {
+    const exemption = rules.values['TAX_EXEMPTION'] ?? 0;
+    let remaining = Math.max(0, taxableIncome - exemption);
+    let tax = 0;
+    for (const b of rules.brackets.sort((a, b) => a.order - b.order)) {
+      const bandSize = (b.toAmount ?? Infinity) - b.fromAmount;
+      const taxableInBand = Math.min(remaining, bandSize);
+      if (taxableInBand &lt;= 0) break;
+      tax += taxableInBand * b.ratePercent / 100;
+      remaining -= taxableInBand;
+    }
+    return tax;
+  }
+}</pre>
+        <p>درآمد مشمول مالیات = مجموع Component‌های <code class="tag">isTaxable=true</code> منهای معافیت و کسورات قابل کسر (مثلاً سهم بیمه‌ی کارگر، طبق قانون). پله‌ها در <code class="tag">PayrollTaxBracket</code> نگه داشته می‌شوند تا افزودن/حذف پله بدون تغییر کد ممکن باشد.</p>
+      </section>
+
+      <!-- 12 -->
+      <section class="block" id="s12">
+        <p class="kicker">§12 · Workflow</p>
+        <h2 class="h">طراحی Workflow</h2>
+        <div class="workflow-chain">
+          <span class="stamp">Draft</span><span class="arrow">→</span>
+          <span class="stamp">Calculated</span><span class="arrow">→</span>
+          <span class="stamp">Reviewed</span><span class="arrow">→</span>
+          <span class="stamp">Approved</span><span class="arrow">→</span>
+          <span class="stamp">Posted</span><span class="arrow">→</span>
+          <span class="stamp locked">Locked 🔒</span>
+        </div>
+        <table>
+          <thead><tr><th>انتقال</th><th>مجوز لازم</th><th>پیش‌شرط</th></tr></thead>
+          <tbody>
+            <tr><td>Draft → Calculated</td><td><code class="tag">payroll_engine.calculate</code></td><td>Pipeline بدون خطا اجرا شده باشد</td></tr>
+            <tr><td>Calculated → Reviewed</td><td><code class="tag">payroll_engine.review</code></td><td>—</td></tr>
+            <tr><td>Reviewed → Approved</td><td><code class="tag">payroll_engine.approve</code></td><td>همه‌ی کارکنان دوره Reviewed باشند</td></tr>
+            <tr><td>Approved → Posted</td><td><code class="tag">payroll_engine.post</code></td><td>سند حسابداری با موفقیت تولید شده باشد</td></tr>
+            <tr><td>Posted → Locked</td><td><code class="tag">payroll_engine.lock</code></td><td>—</td></tr>
+            <tr><td>هر مرحله → Draft (بازگشایی)</td><td><code class="tag">payroll_engine.approve</code> یا بالاتر</td><td>❌ غیرمجاز اگر Locked</td></tr>
+          </tbody>
+        </table>
+        <div class="callout">
+          <span class="lbl">Defense in Depth</span>
+          <p>گارد Service-Layer کافی نیست چون قابل‌دور زدن با یک باگ آینده است. پیشنهاد: یک Postgres Trigger روی <code class="tag">payroll_results</code> که هر <code class="tag">UPDATE</code> را وقتی <code class="tag">status='locked'</code> است رد کند — دقیقاً مثل رفتار فعلی سپتا در قفل‌کردن مرحله‌ی «انتخاب نهایی» استعلام‌ها، اما این‌بار در سطح دیتابیس.</p>
+        </div>
+        <h3 class="sub">نسخه‌بندی و بازمحاسبه‌ی تاریخی</h3>
+        <p>هر <code class="tag">PayrollPeriod</code> به یک <code class="tag">ruleVersionId</code> ثابت اشاره دارد. اگر سال ۱۴۰۷ قانون عوض شود، یک <code class="tag">PayrollRuleVersion</code> جدید ساخته می‌شود؛ دوره‌ی فروردین ۱۴۰۶ همچنان به نسخه‌ی قدیمی اشاره می‌کند، پس بازمحاسبه‌ی آن (حتی سال‌ها بعد) دقیقاً همان اعداد سابق را تولید می‌کند.</p>
+      </section>
+
+      <!-- 13 -->
+      <section class="block" id="s13">
+        <p class="kicker">§13 · Permissions</p>
+        <h2 class="h">طراحی سیستم دسترسی</h2>
+        <p>بدون ساخت جدول Role جدید — فقط افزودن کلیدهای زیر به کاتالوگ <code class="tag">permissions</code> موجود سپتا، به‌علاوه‌ی ۵ Permission Group پیش‌فرض که دقیقاً همین نقش‌ها را نمایندگی می‌کنند.</p>
+        <div class="card">
+          <div class="card-head"><span>module: payroll_engine</span><span class="pill neutral">permission catalog</span></div>
+          <div class="card-body scroll">
+            <table>
+              <thead><tr><th>کلید</th><th>عنوان فارسی</th><th>HR Manager</th><th>Payroll Expert</th><th>Finance Manager</th><th>CEO</th><th>Viewer</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">payroll_engine.manage_rules</td><td>مدیریت قوانین/فرمول‌ها</td><td>✅</td><td>✅</td><td></td><td></td><td></td></tr>
+                <tr><td class="mono">payroll_engine.manage_profiles</td><td>پروفایل حقوقی پرسنل</td><td>✅</td><td></td><td></td><td></td><td></td></tr>
+                <tr><td class="mono">payroll_engine.enter_worklog</td><td>ثبت/اصلاح کارکرد</td><td></td><td>✅</td><td></td><td></td><td></td></tr>
+                <tr><td class="mono">payroll_engine.calculate</td><td>اجرای محاسبه</td><td></td><td>✅</td><td></td><td></td><td></td></tr>
+                <tr><td class="mono">payroll_engine.review</td><td>بازبینی</td><td></td><td>✅</td><td>✅</td><td></td><td></td></tr>
+                <tr><td class="mono">payroll_engine.approve</td><td>تأیید نهایی</td><td></td><td></td><td>✅</td><td>✅</td><td></td></tr>
+                <tr><td class="mono">payroll_engine.post</td><td>صدور سند حسابداری</td><td></td><td></td><td>✅</td><td></td><td></td></tr>
+                <tr><td class="mono">payroll_engine.lock</td><td>قفل نهایی</td><td></td><td></td><td></td><td>✅</td><td></td></tr>
+                <tr><td class="mono">payroll_engine.view_reports</td><td>مشاهده‌ی گزارش‌ها</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr>
+                <tr><td class="mono">payroll_engine.view_own_payslip</td><td>مشاهده‌ی فیش خود (Self-Service)</td><td>همه‌ی کاربران</td><td></td><td></td><td></td><td></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p>مدیر می‌تواند این جدول را دقیقاً از همان UI فعلی «کاربران و گروه‌های دسترسی» شخصی‌سازی کند — بدون نیاز به صفحه‌ی تنظیمات جدید.</p>
+      </section>
+
+      <!-- 14 -->
+      <section class="block" id="s14">
+        <p class="kicker">§14 · API Design</p>
+        <h2 class="h">طراحی API ها</h2>
+        <div class="card">
+          <div class="card-body scroll">
+            <table>
+              <thead><tr><th>Method</th><th>Endpoint</th><th>مجوز</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">GET/POST</td><td class="mono">/payroll/rule-versions</td><td class="mono">manage_rules</td></tr>
+                <tr><td class="mono">GET/POST/PATCH</td><td class="mono">/payroll/rule-versions/:id/rules</td><td class="mono">manage_rules</td></tr>
+                <tr><td class="mono">GET/POST/PATCH</td><td class="mono">/payroll/rule-versions/:id/tax-brackets</td><td class="mono">manage_rules</td></tr>
+                <tr><td class="mono">GET/POST/PATCH</td><td class="mono">/payroll/rule-versions/:id/formulas</td><td class="mono">manage_rules</td></tr>
+                <tr><td class="mono">GET/POST/PATCH</td><td class="mono">/payroll/components</td><td class="mono">manage_rules</td></tr>
+                <tr><td class="mono">GET</td><td class="mono">/payroll/components/dependency-order?ruleVersionId=</td><td class="mono">manage_rules</td></tr>
+                <tr><td class="mono">GET/PATCH</td><td class="mono">/employees/:id/payroll-profile</td><td class="mono">manage_profiles</td></tr>
+                <tr><td class="mono">POST</td><td class="mono">/payroll/periods</td><td class="mono">manage_rules</td></tr>
+                <tr><td class="mono">POST</td><td class="mono">/payroll/periods/:id/worklogs/sync-from-hr</td><td class="mono">enter_worklog</td></tr>
+                <tr><td class="mono">GET/PATCH</td><td class="mono">/payroll/periods/:id/worklogs</td><td class="mono">enter_worklog</td></tr>
+                <tr><td class="mono">POST</td><td class="mono">/payroll/periods/:id/calculate</td><td class="mono">calculate</td></tr>
+                <tr><td class="mono">POST</td><td class="mono">/payroll/periods/:id/calculate/:employeeId</td><td class="mono">calculate</td></tr>
+                <tr><td class="mono">GET</td><td class="mono">/payroll/periods/:id/results</td><td class="mono">view_reports</td></tr>
+                <tr><td class="mono">POST</td><td class="mono">/payroll/results/:id/review</td><td class="mono">review</td></tr>
+                <tr><td class="mono">POST</td><td class="mono">/payroll/results/:id/approve</td><td class="mono">approve</td></tr>
+                <tr><td class="mono">POST</td><td class="mono">/payroll/results/:id/post</td><td class="mono">post</td></tr>
+                <tr><td class="mono">POST</td><td class="mono">/payroll/results/:id/lock</td><td class="mono">lock</td></tr>
+                <tr><td class="mono">POST</td><td class="mono">/payroll/results/:id/payslip/generate?format=pdf|xlsx</td><td class="mono">view_reports</td></tr>
+                <tr><td class="mono">GET</td><td class="mono">/payroll/payslips/mine</td><td class="mono">view_own_payslip</td></tr>
+                <tr><td class="mono">GET</td><td class="mono">/payroll/reports/:type</td><td class="mono">view_reports</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 15 -->
+      <section class="block" id="s15">
+        <p class="kicker">§15 · Frontend</p>
+        <h2 class="h">طراحی Frontend — صفحات و کامپوننت‌ها</h2>
+        <div class="grid3">
+          <div class="tile"><h4>PayrollConfigPage</h4><p>تب‌های نسخه/قوانین/پله‌های مالیات/فرمول‌ها/اجزا. نمای پیش‌نمایش گراف وابستگی (<code class="tag">DependencyGraphView</code>) قبل از فعال‌سازی نسخه.</p></div>
+          <div class="tile"><h4>PayrollWorkLogPage</h4><p>جدول کارکرد یک دوره؛ دکمه‌ی «همگام‌سازی از HR» + ویرایش دستی ردیف‌های استثنا.</p></div>
+          <div class="tile"><h4>PayrollRunPage</h4><p>انتخاب دوره → «اجرای محاسبه» → جدول نتایج با <span class="pill neutral">وضعیت Workflow</span> هر ردیف + اقدامات دسته‌جمعی Review/Approve/Post/Lock.</p></div>
+          <div class="tile"><h4>PayslipViewer</h4><p>فیش تکی با ریز اجزا؛ دکمه‌ی «دریافت فایل» (PDF/Excel، از ماژول Documents مشترک با پیشنهادها).</p></div>
+          <div class="tile"><h4>PayrollReportsPage</h4><p>۱۲ نوع گزارش، فیلتر دوره/مرکز هزینه/شعبه، خروجی PDF/Excel.</p></div>
+          <div class="tile"><h4>Self-Service</h4><p>تب «فیش‌های من» در ProfilePage موجود (بسط همان <code class="tag">payslips.mine</code> فعلی).</p></div>
+        </div>
+      </section>
+
+      <!-- 16 -->
+      <section class="block" id="s16">
+        <p class="kicker">§16 · Reporting</p>
+        <h2 class="h">گزارش‌ها و خروجی‌ها</h2>
+        <table>
+          <thead><tr><th>گزارش</th><th>منبع داده</th></tr></thead>
+          <tbody>
+            <tr><td>فیش حقوقی</td><td>PayrollResult + PayrollResultItem</td></tr>
+            <tr><td>لیست حقوق</td><td>PayrollResult (کل دوره)</td></tr>
+            <tr><td>گزارش/لیست بیمه</td><td>PayrollResult.insurance*</td></tr>
+            <tr><td>گزارش مالیات + فایل مالیات</td><td>PayrollResult.taxAmount (خروجی فرمت استاندارد سازمان امور مالیاتی)</td></tr>
+            <tr><td>گزارش هزینه پرسنل</td><td>PayrollResult.employerCost</td></tr>
+            <tr><td>گزارش مرکز هزینه / شعبه</td><td>Group by EmployeePayrollProfile.costCenterDeptId / our_entities</td></tr>
+            <tr><td>گزارش اضافه‌کار / مأموریت / مرخصی</td><td>PayrollWorkLog</td></tr>
+          </tbody>
+        </table>
+        <p>همه‌ی خروجی‌ها با موتور تولید سند مشترک (Puppeteer برای PDF، ExcelJS برای Excel) که در ماژول پیشنهاد فروش سپتا از قبل ساخته و آزموده شده است.</p>
+      </section>
+
+      <!-- 17 -->
+      <section class="block" id="s17">
+        <p class="kicker">§17 · Test Scenarios</p>
+        <h2 class="h">سناریوهای تست</h2>
+        <div class="grid3">
+          <div class="tile">
+            <h4>Unit</h4>
+            <p>Parser فرمول (edge case‌های گرامری)، تشخیص چرخه‌ی Dependency، محاسبه‌ی بیمه/مالیات با اعداد شناخته‌شده، گاردهای Workflow.</p>
+          </div>
+          <div class="tile">
+            <h4>Integration</h4>
+            <p>اجرای کامل Pipeline برای یک کارمند نمونه؛ بازمحاسبه‌ی یک دوره‌ی قدیمی با نسخه‌ی قانونِ همان‌زمان و تطبیق دقیق نتیجه.</p>
+          </div>
+          <div class="tile">
+            <h4>E2E</h4>
+            <p>تعریف قانون → ثبت کارکرد → اجرای محاسبه → Review → Approve → Post → Lock → تأیید غیرقابل‌تغییر بودن → تولید فیش PDF.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 18 -->
+      <section class="block" id="s18">
+        <p class="kicker">§18 · Risks &amp; Roadmap</p>
+        <h2 class="h">ریسک‌ها، نقاط باز و پیشنهادهای آینده</h2>
+        <ul class="tick">
+          <li><b>عملکرد Batch:</b> اجرای هم‌زمان صدها کارمند نیاز به موازی‌سازی محدود (p-limit) دارد؛ برای مقیاس خیلی بزرگ‌تر، صف پیام (BullMQ) در نظر گرفته شود.</li>
+          <li><b>Formula Builder بصری:</b> فاز اول فقط ورود متنی فرمول؛ یک ادیتور بصری (Block-Based) نقطه‌ی توسعه‌ی طبیعی آینده است.</li>
+          <li><b>حسابداری دوطرفه:</b> Accounting Integration فعلاً فقط یک سند تولید می‌کند؛ یکپارچگی کامل دفتر کل خارج از اسکوپ این فاز است (دقیقاً هم‌راستا با یادداشت موجود پروژه درباره‌ی ماژول حسابداری آینده).</li>
+          <li><b>تعدیل معوقه (Arrears):</b> اصلاح فیش یک دوره‌ی Locked باید به‌صورت یک ردیف تعدیل در دوره‌ی جاری مدل شود، نه بازنویسی گذشته — نیاز به طراحی جداگانه.</li>
+          <li><b>دو تصمیم باز §00-الف/ب</b> باید قبل از شروع پیاده‌سازی نهایی شوند.</li>
+        </ul>
+      </section>
+
+    </main>
+  </div>
+
+  <footer class="end" id="s19">
+    <p class="kicker">§19 · Sign-off</p>
+    <h2 class="h" style="font-size:22px;">جمع‌بندی و گام بعدی</h2>
+    <p>این سند فقط طراحی است — <b>هیچ کدی نوشته نشده</b>. طبق درخواست شما، پیاده‌سازی تنها پس از تأیید این معماری (و تصمیم‌گیری درباره‌ی دو مورد §00-الف و §00-ب) آغاز می‌شود، و مرحله‌به‌مرحله بدون شکستن این معماری پیش می‌رود.</p>
+    <p>اگر بخشی نیاز به اصلاح دارد، همان بخش را مشخص کنید تا فقط آن بخش بازنویسی شود.</p>
+  </footer>
+
+</div>

@@ -1,0 +1,56 @@
+# استقرار Production روی VPS — بدون دامنه (فقط IP، پورت ۸۰)
+# اجرا: docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+#
+# ⚠️ برخلاف docker-compose.yml (توسعه): پورت پستگرس و API مستقیم به بیرون منتشر نمی‌شن —
+# فقط سرویس web (nginx، پورت ۸۰) از بیرون در دسترسه؛ بقیه فقط داخل شبکه Docker.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: septa_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: septa
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: septa
+    volumes:
+      - septa_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U septa -d septa"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: septa_api
+    restart: unless-stopped
+    env_file:
+      - apps/api/.env.production
+    environment:
+      # داخل شبکه Docker هاست پستگرس "postgres" است، نه localhost
+      DATABASE_URL: postgresql://septa:${POSTGRES_PASSWORD}@postgres:5432/septa?schema=public
+    volumes:
+      # ⚠️ StorageService با process.cwd() کار می‌کنه؛ چون CMD از WORKDIR /app اجرا می‌شه،
+      # مسیر واقعی /app/uploads است (نه apps/api/uploads) — این مسیر باید دقیق بمونه
+      - septa_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: septa_web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+
+volumes:
+  septa_postgres_data:
+  septa_uploads:

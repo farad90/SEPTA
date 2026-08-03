@@ -1,0 +1,2396 @@
+// ============================================================
+// این فایل به‌صورت دستی نوشته شده، نه با `prisma db pull`.
+//
+// چرا: این محیط توسعه Docker/PostgreSQL در دسترس نداشت، پس امکان اجرای
+// واقعی migration ها و introspect کردن دیتابیس زنده نبود. فقط مدل‌های
+// استفاده‌شده در فاز ۱ (احراز هویت/RBAC) اینجا تعریف شدن، نه کل ۹ دامنه‌ی
+// erp-schema.sql.
+//
+// ⚠️ اقدام لازم قبل از فاز ۲: بعد از اجرای migration 0001 و 0002 روی یک
+// دیتابیس واقعی، دستور زیر رو اجرا کن تا این فایل با ساختار واقعی دیتابیس
+// تطبیق داده بشه (و مدل‌های دامنه‌های بعدی هم اضافه بشن):
+//   pnpm --filter api exec prisma db pull
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fullName                    String    @map("full_name") @db.VarChar(200)
+  fullNameEn                  String?   @map("full_name_en") @db.VarChar(200)
+  // فاز ۵۱ — تا این فاز هیچ DTO ای این ستون رو نمی‌خوند/نمی‌نوشت؛ حالا به‌عنوان «شماره
+  // داخلی» کاربر استفاده می‌شه (بدون نیاز به ستون جدید)
+  phone                       String?   @db.VarChar(30)
+  mobile                      String?   @db.VarChar(30)
+  email                       String?   @unique @db.VarChar(200)
+  profilePhotoUrl             String?   @map("profile_photo_url")
+  birthDate                   DateTime? @map("birth_date") @db.Date
+  nationalId                  String?   @map("national_id") @db.VarChar(20)
+  birthCertificateNo          String?   @map("birth_certificate_no") @db.VarChar(20)
+  address                     String?
+  status                      String    @default("active") @db.VarChar(20)
+  permissionGroupId           String?   @map("permission_group_id") @db.Uuid
+  passwordHash                String    @map("password_hash")
+  passwordResetToken          String?   @map("password_reset_token") @db.VarChar(255)
+  passwordResetTokenExpiresAt DateTime? @map("password_reset_token_expires_at") @db.Timestamptz
+  requestedDepartment         String?   @map("requested_department") @db.VarChar(50)
+  createdAt                   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                   DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  permissionGroup         PermissionGroup?  @relation("UserPermissionGroup", fields: [permissionGroupId], references: [id])
+  createdPermissionGroups PermissionGroup[] @relation("PermissionGroupCreatedBy")
+  refreshTokens           RefreshToken[]
+
+  inquiriesAsSalesExpert Inquiry[]             @relation("InquirySalesExpert")
+  inquiriesCreated       Inquiry[]             @relation("InquiryCreatedBy")
+  inquiriesLocked        Inquiry[]             @relation("InquirySelectionLockedBy")
+  discussionsAuthored    InquiryDiscussion[]   @relation("DiscussionAuthor")
+  discussionsMentioned   InquiryDiscussion[]   @relation("DiscussionMentioned")
+  uploadedItemDocuments  InquiryItemDocument[] @relation("ItemDocumentUploadedBy")
+  uploadedInquiryDocuments InquiryDocument[] @relation("InquiryDocumentUploadedBy")
+  uploadedCatalogDocuments ItemCatalogDocument[] @relation("CatalogDocumentUploadedBy")
+  uploadedShipmentDocuments ShipmentDocument[]  @relation("ShipmentDocumentUploadedBy")
+  shipmentEditRequestsMade  ShipmentEditRequest[] @relation("ShipmentEditRequestedBy")
+  shipmentEditRequestsDecided ShipmentEditRequest[] @relation("ShipmentEditDecidedBy")
+  priceChangeRequestsMade    FinancialProposalPriceChangeRequest[] @relation("PriceChangeRequestedBy")
+  priceChangeRequestsDecided FinancialProposalPriceChangeRequest[] @relation("PriceChangeDecidedBy")
+  rfqsAsCommercialExpert SupplierRfq[]         @relation("RfqCommercialExpert")
+  rfqDeleteRequestsMade    RfqDeleteRequest[]  @relation("RfqDeleteRequestedBy")
+  rfqDeleteRequestsDecided RfqDeleteRequest[]  @relation("RfqDeleteDecidedBy")
+  selectionExchangeRatesUpdated InquirySelectionExchangeRate[] @relation("SelectionExchangeRateUpdatedBy")
+  freightRfqsAsCommercialExpert FreightRfq[]   @relation("FreightRfqCommercialExpert")
+  shipmentsAsCommercialExpert   Shipment[]     @relation("ShipmentCommercialExpert")
+  lettersCreated                Letter[]              @relation("LetterCreatedBy")
+  lettersResponsibleFor         Letter[]              @relation("LetterResponsibleUser")
+  letterSignatures              LetterSigner[]         @relation("LetterSignerUser")
+  letterWorkflowLogsPerformed   LetterWorkflowLog[]    @relation("WorkflowPerformedBy")
+  letterWorkflowLogsReferredTo  LetterWorkflowLog[]    @relation("WorkflowReferredTo")
+  letterAuditLogs               LetterAuditLog[]       @relation("LetterAuditUser")
+  documentsUploaded             Document[]             @relation("DocumentUploadedBy")
+  notifications                 Notification[]
+  chatConversationsCreated      ChatConversation[]
+  chatParticipations            ChatParticipant[]
+  chatMessagesSent              ChatMessage[]
+  identityDocuments             UserIdentityDocument[]
+  activitiesAssigned            Activity[]             @relation("ActivityAssignedTo")
+  activitiesCreated              Activity[]             @relation("ActivityCreatedBy")
+  activityOutcomeTemplatesCreated ActivityOutcomeTemplate[]
+  taskWatching                    TaskWatcher[]          @relation("TaskWatcherUser")
+  taskWatchersAdded               TaskWatcher[]          @relation("TaskWatcherAddedBy")
+  taskTimelineEntries             TaskTimelineEntry[]
+  employees                       Employee[]
+  payrollRuleVersionsCreated      PayrollRuleVersion[]
+  payrollAuditLogsPerformed       PayrollAuditLog[]
+  siteSettingsUpdated             SiteSettings[]         @relation("SiteSettingsUpdatedBy")
+  broadcastMessagesCreated        BroadcastMessage[]      @relation("BroadcastCreatedBy")
+  broadcastMessagesTargeted       BroadcastMessage[]      @relation("BroadcastTargetUser")
+  broadcastMessageDismissals      BroadcastMessageDismissal[]
+
+  @@map("users")
+}
+
+model UserIdentityDocument {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  documentType String   @map("document_type") @db.VarChar(30)
+  pageNumber   Int?     @map("page_number")
+  fileUrl      String   @map("file_url")
+  uploadedAt   DateTime @default(now()) @map("uploaded_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_identity_documents")
+}
+
+model Permission {
+  id               String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  module           String  @db.VarChar(50)
+  permissionKey    String  @unique @map("permission_key") @db.VarChar(100)
+  permissionLabel  String  @map("permission_label") @db.VarChar(300)
+  supportsLimit    Boolean @default(false) @map("supports_limit")
+
+  groupItems PermissionGroupItem[]
+
+  @@map("permissions")
+}
+
+model PermissionGroup {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupName String   @map("group_name") @db.VarChar(150)
+  isDefault Boolean  @default(false) @map("is_default")
+  createdBy String?  @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  creator User?                @relation("PermissionGroupCreatedBy", fields: [createdBy], references: [id])
+  users   User[]                @relation("UserPermissionGroup")
+  items   PermissionGroupItem[]
+  broadcastMessagesTargeted BroadcastMessage[] @relation("BroadcastTargetGroup")
+
+  @@map("permission_groups")
+}
+
+model PermissionGroupItem {
+  permissionGroupId String   @map("permission_group_id") @db.Uuid
+  permissionId       String   @map("permission_id") @db.Uuid
+  limitValue         Decimal? @map("limit_value") @db.Decimal(18, 2)
+
+  permissionGroup PermissionGroup @relation(fields: [permissionGroupId], references: [id], onDelete: Cascade)
+  permission      Permission      @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([permissionGroupId, permissionId])
+  @@map("permission_group_items")
+}
+
+model BusinessPartner {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  partnerType        String   @map("partner_type") @db.VarChar(20)
+  companyName        String   @map("company_name") @db.VarChar(300)
+  country            String?  @db.VarChar(100)
+  industry           String?  @db.VarChar(150)
+  address            String?
+  // فاز ۳۷ — دوزبانه، برای پیشنهاد/پیش‌فاکتور انگلیسی (فاز ۳۸)
+  companyNameEn      String?  @map("company_name_en") @db.VarChar(300)
+  addressEn          String?  @map("address_en")
+  // فاز ۵۱ — کد اختصاری لاتین؛ اگه کاربر وارد نکنه، خودکار از حروف اول company_name_en ساخته می‌شه
+  shortCodeEn        String?  @map("short_code_en") @db.VarChar(20)
+  taxId              String?  @map("tax_id") @db.VarChar(100)
+  province           String?  @db.VarChar(100)
+  city               String?  @db.VarChar(100)
+  postalCode         String?  @map("postal_code") @db.VarChar(20)
+  phone              String?  @db.VarChar(30)
+  email              String?  @db.VarChar(200)
+  nationalId         String?  @map("national_id") @db.VarChar(20)
+  registrationNumber String?  @map("registration_number") @db.VarChar(50)
+  notes              String?
+  createdBy          String?  @map("created_by") @db.Uuid
+  status             String   @default("active") @db.VarChar(20)
+  phones             Json?    // آرایه شماره تلفن‌ها
+  fax                String?  @db.VarChar(30)
+  registrationDate   DateTime? @map("registration_date") @db.Date
+  logoUrl            String?  @map("logo_url")
+  isForeign          Boolean  @default(false) @map("is_foreign")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  contacts  PartnerContact[]
+  inquiries Inquiry[]        @relation("InquiryBuyer")
+  rfqs      SupplierRfq[]    @relation("RfqSupplier")
+  orderItemsAsSupplier OrderItem[] @relation("OrderItemSupplier")
+  purchaseOrdersAsSupplier PurchaseOrder[] @relation("PurchaseOrderSupplier")
+  freightRfqsAsCompany     FreightRfq[]    @relation("FreightRfqCompany")
+  shipmentsAsFreightCompany Shipment[]     @relation("ShipmentFreightCompany")
+  lettersAsSender           Letter[]       @relation("LetterSenderPartner")
+  lettersAsReceiver         Letter[]       @relation("LetterReceiverPartner")
+  proposalClientCounters    ProposalClientCounter[]
+
+  @@map("business_partners")
+}
+
+model PartnerContact {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  partnerId   String   @map("partner_id") @db.Uuid
+  contactName String   @map("contact_name") @db.VarChar(200)
+  // فاز ۳۷ — دوزبانه، برای پیشنهاد/پیش‌فاکتور انگلیسی (فاز ۳۸)
+  contactNameEn String? @map("contact_name_en") @db.VarChar(200)
+  contactType String?  @map("contact_type") @db.VarChar(30)
+  level       String?  @db.VarChar(20)
+  phone       String?  @db.VarChar(30)
+  mobile      String?  @db.VarChar(30)
+  email       String?  @db.VarChar(200)
+  department  String?  @db.VarChar(150)
+  extension   String?  @db.VarChar(20)
+  photoUrl    String?  @map("photo_url")
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  partner   BusinessPartner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  inquiries Inquiry[]       @relation("InquiryBuyerContact")
+  lettersAsSenderContact   Letter[] @relation("LetterSenderContact")
+  lettersAsReceiverContact Letter[] @relation("LetterReceiverContact")
+
+  @@map("partner_contacts")
+}
+
+model ItemCatalog {
+  itemCode               String   @id @map("item_code") @db.VarChar(100)
+  partNumber             String   @map("part_number") @db.VarChar(200)
+  itemDescription        String   @map("item_description")
+  builder                String?  @db.VarChar(200)
+  defaultMeasurementUnit String?  @map("default_measurement_unit") @db.VarChar(30)
+  createdBy              String?  @map("created_by") @db.Uuid
+  status                 String   @default("active") @db.VarChar(20)
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  inquiryItems InquiryItem[]
+  documents    ItemCatalogDocument[]
+
+  @@map("item_catalog")
+}
+
+model ItemCatalogDocument {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  itemCode   String   @map("item_code") @db.VarChar(100)
+  fileUrl    String   @map("file_url")
+  fileName   String?  @map("file_name") @db.VarChar(300)
+  uploadedBy String?  @map("uploaded_by") @db.Uuid
+  uploadedAt DateTime @default(now()) @map("uploaded_at") @db.Timestamptz
+
+  item     ItemCatalog @relation(fields: [itemCode], references: [itemCode], onDelete: Cascade)
+  uploader User?       @relation("CatalogDocumentUploadedBy", fields: [uploadedBy], references: [id])
+
+  @@map("item_catalog_documents")
+}
+
+// ============================================================
+// دامنه ۲: استعلام — فاز ۳
+// ستون‌های مرحله «انتخاب نهایی» (selected_offer_item_id و ...) در baseline با
+// ALTER اضافه شدن؛ اینجا به‌صورت اسکالر می‌آن چون جدول‌های دامنه ۳ هنوز مدل ندارن
+// ============================================================
+
+model Inquiry {
+  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  internalNumber           String    @unique @map("internal_number") @db.VarChar(50)
+  inquiryNumber            String?   @map("inquiry_number") @db.VarChar(100)
+  buyerId                  String    @map("buyer_id") @db.Uuid
+  buyerContactId           String?   @map("buyer_contact_id") @db.Uuid
+  subject                  String    @db.VarChar(300)
+  offerEndDate             DateTime  @map("offer_end_date") @db.Date
+  extendedOfferEndDate     DateTime? @map("extended_offer_end_date") @db.Date
+  isEquivalentAccepted     Boolean?  @map("is_equivalent_accepted")
+  settlementTerms          String?   @map("settlement_terms")
+  advancePaymentAvailable  Boolean?  @map("advance_payment_available")
+  description              String?
+  salesExpertId            String    @map("sales_expert_id") @db.Uuid
+  createdByUserId          String    @map("created_by_user_id") @db.Uuid
+  inquiryStartDate         DateTime  @map("inquiry_start_date") @db.Date
+  status                   String    @default("in_progress") @db.VarChar(30)
+  channel                  String?   @db.VarChar(30)
+  urgency                  String?   @default("normal") @db.VarChar(20)
+  managerNoteToSales       String?   @map("manager_note_to_sales")
+  selectionLockedAt        DateTime? @map("selection_locked_at") @db.Timestamptz
+  selectionLockedBy        String?   @map("selection_locked_by") @db.Uuid
+  // فاز ۵۷ — ارز مبنای مرحله «انتخاب نهایی و قیمت‌گذاری»؛ وقتی پر باشه، قیمت فروش نهایی
+  // هر قلم بر همین ارز محاسبه می‌شه (نگاه کنید به inquiry_selection_exchange_rates)
+  selectionBaseCurrencyCode String?  @map("selection_base_currency_code") @db.VarChar(3)
+  deletedAt                DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy                String?   @map("deleted_by") @db.Uuid
+  createdAt                DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  buyer            BusinessPartner     @relation("InquiryBuyer", fields: [buyerId], references: [id])
+  buyerContact     PartnerContact?     @relation("InquiryBuyerContact", fields: [buyerContactId], references: [id])
+  salesExpert      User                @relation("InquirySalesExpert", fields: [salesExpertId], references: [id])
+  createdBy        User                @relation("InquiryCreatedBy", fields: [createdByUserId], references: [id])
+  selectionLocker  User?               @relation("InquirySelectionLockedBy", fields: [selectionLockedBy], references: [id])
+  selectionBaseCurrency Currency?      @relation(fields: [selectionBaseCurrencyCode], references: [currencyCode])
+  items            InquiryItem[]
+  documents        InquiryDocument[]
+  discussions      InquiryDiscussion[]
+  rfqs             SupplierRfq[]
+  deliveryOptions  InquiryDeliveryOption[]
+  selectionExchangeRates InquirySelectionExchangeRate[]
+  financialProposals FinancialProposal[]
+  technicalProposals TechnicalProposal[]
+  orders             Order[]
+  letters            Letter[]            @relation("LetterRelatedInquiry")
+
+  @@map("inquiries")
+}
+
+// فاز ۵۷ — نرخ تبدیل دستی هر ارز آفر تأمین‌کننده به ارز مبنای انتخاب‌شده برای این پرونده
+// (نه exchange_rates سراسری که فقط برای تبدیل به ریاله) — هر ارز مبدأ برای هر پرونده یک نرخه
+model InquirySelectionExchangeRate {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  inquiryId        String   @map("inquiry_id") @db.Uuid
+  fromCurrencyCode String   @map("from_currency_code") @db.VarChar(3)
+  rate             Decimal  @db.Decimal(18, 6)
+  updatedBy        String?  @map("updated_by") @db.Uuid
+  updatedAt        DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  inquiry      Inquiry  @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  fromCurrency Currency @relation(fields: [fromCurrencyCode], references: [currencyCode])
+  updater      User?    @relation("SelectionExchangeRateUpdatedBy", fields: [updatedBy], references: [id])
+
+  @@unique([inquiryId, fromCurrencyCode], map: "uq_selection_exchange_rate_inquiry_currency")
+  @@map("inquiry_selection_exchange_rates")
+}
+
+model InquiryItem {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  inquiryId           String   @map("inquiry_id") @db.Uuid
+  rowIndex            Int      @map("row_index")
+  itemCode            String   @map("item_code") @db.VarChar(100)
+  description         String
+  quantity            Decimal  @db.Decimal(18, 4)
+  measurementUnit     String   @map("measurement_unit") @db.VarChar(30)
+  equivalentType      String?  @map("equivalent_type") @db.VarChar(200)
+  drawingTypeRow      String?  @map("drawing_type_row") @db.VarChar(200)
+  partNumber          String?  @map("part_number") @db.VarChar(200)
+  drawingNumber       String?  @map("drawing_number") @db.VarChar(200)
+  builder             String?  @db.VarChar(200)
+  serialNumber        String?  @map("serial_number") @db.VarChar(200)
+  selectedOfferItemId String?  @map("selected_offer_item_id") @db.Uuid
+  selectionNotes      String?  @map("selection_notes")
+  markupPercent       Decimal? @map("markup_percent") @db.Decimal(6, 3)
+  finalSalePrice      Decimal? @map("final_sale_price") @db.Decimal(18, 4)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  inquiry           Inquiry               @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  catalogItem       ItemCatalog           @relation(fields: [itemCode], references: [itemCode])
+  documents         InquiryItemDocument[]
+  rfqItems          RfqItem[]
+  offerItems        SupplierOfferItem[]   @relation("OfferItemInquiryItem")
+  selectedOfferItem SupplierOfferItem?    @relation("SelectedOfferItem", fields: [selectedOfferItemId], references: [id])
+  financialProposalItems FinancialProposalItem[]
+  technicalProposalItems TechnicalProposalItem[]
+  outcome                InquiryItemOutcome?
+  orderItems              OrderItem[]
+  warehouseReceiptItems   WarehouseReceiptItem[]
+
+  @@unique([inquiryId, rowIndex])
+  @@map("inquiry_items")
+}
+
+// نتیجه نهایی برد/باخت هر قلم — فاز ۷ (جدول در baseline موجوده)
+model InquiryItemOutcome {
+  inquiryItemId    String    @id @map("inquiry_item_id") @db.Uuid
+  result           String    @db.VarChar(20)
+  decisionDate     DateTime? @map("decision_date") @db.Date
+  lossReason       String?   @map("loss_reason") @db.VarChar(50)
+  competitorName   String?   @map("competitor_name") @db.VarChar(200)
+  competitorPrice  Decimal?  @map("competitor_price") @db.Decimal(18, 4)
+  winReason        String?   @map("win_reason") @db.VarChar(100)
+  expertNote       String?   @map("expert_note")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  inquiryItem InquiryItem @relation(fields: [inquiryItemId], references: [id], onDelete: Cascade)
+
+  @@map("inquiry_item_outcomes")
+}
+
+// ============================================================
+// دامنه ۵: اجرای سفارش — سفارش مشتری — فاز ۸ (جدول‌ها در baseline موجودن)
+// ============================================================
+
+model Order {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderNumber      String    @unique @map("order_number") @db.VarChar(50)
+  inquiryId        String    @map("inquiry_id") @db.Uuid
+  contractNumber   String?   @map("contract_number") @db.VarChar(100)
+  contractDate     DateTime? @map("contract_date") @db.Date
+  totalAmount      Decimal   @map("total_amount") @db.Decimal(18, 4)
+  deliveryDueDate  DateTime? @map("delivery_due_date") @db.Date
+  contractFileUrl  String?   @map("contract_file_url")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  inquiry           Inquiry            @relation(fields: [inquiryId], references: [id])
+  items             OrderItem[]
+  customerPayments  CustomerPayment[]
+  issuedGuarantees  IssuedGuarantee[]
+  purchaseOrders    PurchaseOrder[]
+  deliveries        Delivery[]
+  invoices          Invoice[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId       String  @map("order_id") @db.Uuid
+  inquiryItemId String  @map("inquiry_item_id") @db.Uuid
+  supplierId    String  @map("supplier_id") @db.Uuid
+  purchasePrice Decimal @map("purchase_price") @db.Decimal(18, 4)
+  salePrice     Decimal @map("sale_price") @db.Decimal(18, 4)
+  quantity      Decimal @db.Decimal(18, 4)
+
+  order       Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  inquiryItem InquiryItem     @relation(fields: [inquiryItemId], references: [id])
+  supplier    BusinessPartner @relation("OrderItemSupplier", fields: [supplierId], references: [id])
+  poItems     PoItem[]
+
+  @@unique([orderId, inquiryItemId])
+  @@map("order_items")
+}
+
+// ============================================================
+// دامنه ۵: اجرای سفارش — سفارش خرید (PO) — فاز ۹ (جدول‌ها در baseline موجودن)
+// ============================================================
+
+model PurchaseOrder {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  poNumber        String    @unique @map("po_number") @db.VarChar(50)
+  orderId         String    @map("order_id") @db.Uuid
+  supplierId      String    @map("supplier_id") @db.Uuid
+  ourEntityId     String    @map("our_entity_id") @db.Uuid
+  currencyCode    String    @map("currency_code") @db.VarChar(3)
+  totalAmount     Decimal   @map("total_amount") @db.Decimal(18, 4)
+  issueDate       DateTime  @map("issue_date") @db.Date
+  deliveryDueDate DateTime? @map("delivery_due_date") @db.Date
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  order            Order              @relation(fields: [orderId], references: [id])
+  supplier         BusinessPartner    @relation("PurchaseOrderSupplier", fields: [supplierId], references: [id])
+  ourEntity        OurEntity          @relation(fields: [ourEntityId], references: [id])
+  currency         Currency           @relation(fields: [currencyCode], references: [currencyCode])
+  items            PoItem[]
+  supplierPayments SupplierPayment[]
+  productionTracking ProductionTracking?
+  packages         Package[]
+
+  @@map("purchase_orders")
+}
+
+model PoItem {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  poId        String  @map("po_id") @db.Uuid
+  orderItemId String  @map("order_item_id") @db.Uuid
+  quantity    Decimal @db.Decimal(18, 4)
+  price       Decimal @db.Decimal(18, 4)
+
+  po        PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  orderItem OrderItem     @relation(fields: [orderItemId], references: [id])
+
+  @@unique([poId, orderItemId])
+  @@map("po_items")
+}
+
+model SupplierPayment {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  poId                   String    @map("po_id") @db.Uuid
+  paymentDescription     String?   @map("payment_description") @db.VarChar(200)
+  dueDate                DateTime? @map("due_date") @db.Date
+  amount                 Decimal   @db.Decimal(18, 4)
+  actualPaymentDate      DateTime? @map("actual_payment_date") @db.Date
+  paymentDocumentFileUrl String?   @map("payment_document_file_url")
+  paymentMethod          String?   @map("payment_method") @db.VarChar(50)
+  status                 String    @default("unpaid") @db.VarChar(20)
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  po PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+
+  @@map("supplier_payments")
+}
+
+// ============================================================
+// دامنه ۶: پیگیری تولید + بسته‌بندی — فاز ۱۰ (جدول‌ها در baseline موجودن)
+// ============================================================
+
+model ProductionTracking {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  poId                String    @unique @map("po_id") @db.Uuid
+  status              String    @default("in_production") @db.VarChar(20)
+  estimatedReadyDate  DateTime? @map("estimated_ready_date") @db.Date
+  pickupAddress       String?   @map("pickup_address")
+  pickupPhone         String?   @map("pickup_phone") @db.VarChar(30)
+  pickupContactName   String?   @map("pickup_contact_name") @db.VarChar(200)
+  pickupContactEmail  String?   @map("pickup_contact_email") @db.VarChar(200)
+  pickupContactPhone  String?   @map("pickup_contact_phone") @db.VarChar(30)
+  updatedAt           DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  po   PurchaseOrder             @relation(fields: [poId], references: [id], onDelete: Cascade)
+  logs ProductionTrackingLog[]
+
+  @@map("production_tracking")
+}
+
+model ProductionTrackingLog {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productionTrackingId String   @map("production_tracking_id") @db.Uuid
+  logDate              DateTime @map("log_date") @db.Date
+  note                 String?
+  documentUrl          String?  @map("document_url")
+
+  productionTracking ProductionTracking @relation(fields: [productionTrackingId], references: [id], onDelete: Cascade)
+
+  @@map("production_tracking_logs")
+}
+
+model Package {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  poId            String   @map("po_id") @db.Uuid
+  packageNumber   String   @map("package_number") @db.VarChar(50)
+  lengthCm        Decimal? @map("length_cm") @db.Decimal(10, 2)
+  widthCm         Decimal? @map("width_cm") @db.Decimal(10, 2)
+  heightCm        Decimal? @map("height_cm") @db.Decimal(10, 2)
+  weightKg        Decimal  @map("weight_kg") @db.Decimal(10, 2)
+  pickupLocation  String   @map("pickup_location") @db.VarChar(200)
+  status          String   @default("defining") @db.VarChar(20)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  po PurchaseOrder @relation(fields: [poId], references: [id])
+  freightRfqPackages FreightRfqPackage[]
+  shipmentPackages   ShipmentPackage[]
+
+  @@unique([poId, packageNumber])
+  @@map("packages")
+}
+
+model CustomerPayment {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId                String    @map("order_id") @db.Uuid
+  paymentDescription     String?   @map("payment_description") @db.VarChar(200)
+  dueDate                DateTime? @map("due_date") @db.Date
+  amount                 Decimal   @db.Decimal(18, 4)
+  actualPaymentDate      DateTime? @map("actual_payment_date") @db.Date
+  paymentDocumentFileUrl String?   @map("payment_document_file_url")
+  status                 String    @default("unpaid") @db.VarChar(20)
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  invoiceItems InvoiceItem[]
+
+  @@map("customer_payments")
+}
+
+model IssuedGuarantee {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId      String    @map("order_id") @db.Uuid
+  guaranteeType String   @map("guarantee_type") @db.VarChar(30)
+  amount       Decimal   @db.Decimal(18, 4)
+  issuingBank  String?   @map("issuing_bank") @db.VarChar(200)
+  issueDate    DateTime? @map("issue_date") @db.Date
+  expiryDate   DateTime? @map("expiry_date") @db.Date
+  status       String    @default("active") @db.VarChar(20)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("issued_guarantees")
+}
+
+model InquiryDocument {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  inquiryId  String   @map("inquiry_id") @db.Uuid
+  fileUrl    String   @map("file_url")
+  fileName   String?  @map("file_name") @db.VarChar(300)
+  uploadedBy String?  @map("uploaded_by") @db.Uuid
+  uploadedAt DateTime @default(now()) @map("uploaded_at") @db.Timestamptz
+
+  inquiry  Inquiry @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  uploader User?   @relation("InquiryDocumentUploadedBy", fields: [uploadedBy], references: [id])
+
+  @@map("inquiry_documents")
+}
+
+model InquiryItemDocument {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  inquiryItemId String   @map("inquiry_item_id") @db.Uuid
+  fileUrl       String   @map("file_url")
+  fileName      String?  @map("file_name") @db.VarChar(300)
+  uploadedBy    String?  @map("uploaded_by") @db.Uuid
+  uploadedAt    DateTime @default(now()) @map("uploaded_at") @db.Timestamptz
+
+  item     InquiryItem @relation(fields: [inquiryItemId], references: [id], onDelete: Cascade)
+  uploader User?       @relation("ItemDocumentUploadedBy", fields: [uploadedBy], references: [id])
+
+  @@map("inquiry_item_documents")
+}
+
+model InquiryDiscussion {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  inquiryId       String   @map("inquiry_id") @db.Uuid
+  entryType       String   @default("message") @map("entry_type") @db.VarChar(20)
+  authorId        String   @map("author_id") @db.Uuid
+  commentText     String   @map("comment_text")
+  commentTextRestricted String? @map("comment_text_restricted")
+  tag             String?  @default("general") @db.VarChar(30)
+  metadata        Json?
+  sourceRfqId     String?  @map("source_rfq_id") @db.Uuid
+  mentionedUserId String?  @map("mentioned_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  inquiry   Inquiry      @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  author    User         @relation("DiscussionAuthor", fields: [authorId], references: [id])
+  mentioned User?        @relation("DiscussionMentioned", fields: [mentionedUserId], references: [id])
+  // فاز ۵۷ — SetNull تا حذف قطعی RFQ (بعد از تأیید درخواست حذف) به رکوردهای گفتگو که قبلاً
+  // به این RFQ اشاره کرده بودن برنخوره؛ متن پیام (که شماره RFQ داخلش هست) دست‌نخورده می‌مونه
+  sourceRfq SupplierRfq? @relation("DiscussionSourceRfq", fields: [sourceRfqId], references: [id], onDelete: SetNull)
+
+  @@map("inquiry_discussions")
+}
+
+model InquiryCounter {
+  year       Int @id
+  lastSerial Int @default(0) @map("last_serial")
+
+  @@map("inquiry_counters")
+}
+
+// ============================================================
+// دامنه ۳: تأمین — فاز ۴
+// ============================================================
+
+model Currency {
+  currencyCode String @id @map("currency_code") @db.VarChar(3)
+  currencyName String @map("currency_name") @db.VarChar(100)
+  status       String @default("active") @db.VarChar(20)
+
+  offerItems         SupplierOfferItem[]
+  financialProposals FinancialProposal[]
+  inquiriesAsSelectionBase Inquiry[]
+  selectionExchangeRates   InquirySelectionExchangeRate[]
+  purchaseOrders     PurchaseOrder[]
+  freightOffers      FreightOffer[]
+  invoiceItems       InvoiceItem[]
+  employeeContracts  EmployeeContract[]
+  missionRequests    MissionRequest[]
+  overtimeRecords    OvertimeRecord[]
+  employeeLoans      EmployeeLoan[]
+  employeeBenefits   EmployeeBenefit[]
+  employeeDeductions EmployeeDeduction[]
+  legacyPayslips     LegacyPayslip[]
+
+  @@map("currencies")
+}
+
+model OurEntity {
+  id           String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityName   String @map("entity_name") @db.VarChar(200)
+  shortCode    String @unique @map("short_code") @db.VarChar(10)
+  calendarType String @default("jalali") @map("calendar_type") @db.VarChar(10)
+  country      String @db.VarChar(100)
+  status       String @default("active") @db.VarChar(20)
+
+  // فاز ۳۶ — فیلدهای سربرگ/تماس، برای پنل مدیریتی «شرکت‌های ما»
+  entityNameEn String? @map("entity_name_en") @db.VarChar(200)
+  address      String?
+  addressEn    String? @map("address_en")
+  phone        String? @db.VarChar(30)
+  email        String? @db.VarChar(200)
+  website      String? @db.VarChar(200)
+  logoUrl      String? @map("logo_url")
+
+  // فاز ۳۸ — فوتر سند پیشنهاد (PDF/Word)
+  postalCode         String? @map("postal_code") @db.VarChar(20)
+  registrationNumber String? @map("registration_number") @db.VarChar(50)
+
+  rfqs           SupplierRfq[]
+  purchaseOrders PurchaseOrder[]
+  lettersAsSender   Letter[] @relation("LetterSenderEntity")
+  lettersAsReceiver Letter[] @relation("LetterReceiverEntity")
+  lettersIssued     Letter[] @relation("LetterIssuingEntity")
+  letterCounters    LetterCounter[]
+  proposalCounters  ProposalCounter[]
+  departments        Department[]
+  employees          Employee[]
+  employeeContracts  EmployeeContract[]
+  legacyPayrollPeriods LegacyPayrollPeriod[]
+  financialProposals FinancialProposal[]
+  technicalProposals TechnicalProposal[]
+
+  @@map("our_entities")
+}
+
+model Department {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  departmentName      String   @map("department_name") @db.VarChar(200)
+  parentDepartmentId  String?  @map("parent_department_id") @db.Uuid
+  ourEntityId         String   @map("our_entity_id") @db.Uuid
+  status              String   @default("active") @db.VarChar(20)
+  headEmployeeId      String?  @map("head_employee_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  ourEntity        OurEntity    @relation(fields: [ourEntityId], references: [id])
+  parentDepartment Department?  @relation("DepartmentParent", fields: [parentDepartmentId], references: [id])
+  childDepartments Department[] @relation("DepartmentParent")
+  headEmployee     Employee?    @relation("DepartmentHead", fields: [headEmployeeId], references: [id])
+  employees        Employee[]   @relation("EmployeeDepartment")
+  lettersFrom      Letter[]     @relation("LetterInternalFromDepartment")
+  lettersTo        Letter[]     @relation("LetterInternalToDepartment")
+  payrollCostCenterProfiles EmployeePayrollProfile[]
+
+  @@map("departments")
+}
+
+model Employee {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                 String?   @map("user_id") @db.Uuid
+  // ⚠️ Nullable — پرسنل با حساب کاربری، تا وقتی منابع انسانی شماره پرسنلی تخصیص نداده،
+  // فقط «کاربر سامانه» محسوب می‌شن نه «کارمند رسمی شرکت» (نگاه کنید به EmployeesService)
+  employeeNumber         String?   @unique @map("employee_number") @db.VarChar(30)
+  fullName               String    @map("full_name") @db.VarChar(200)
+  nationalId             String?   @map("national_id") @db.VarChar(20)
+  birthDate              DateTime? @map("birth_date") @db.Date
+  gender                 String?   @db.VarChar(10)
+  mobile                 String?   @db.VarChar(30)
+  email                  String?   @db.VarChar(200)
+  address                String?
+  maritalStatus          String?   @map("marital_status") @db.VarChar(20)
+  militaryServiceStatus  String?   @map("military_service_status") @db.VarChar(30)
+  educationLevel         String?   @map("education_level") @db.VarChar(30)
+  profilePhotoUrl        String?   @map("profile_photo_url")
+  bankAccountNumber      String?   @map("bank_account_number") @db.VarChar(50)
+  bankName               String?   @map("bank_name") @db.VarChar(100)
+  emergencyContactName   String?   @map("emergency_contact_name") @db.VarChar(200)
+  emergencyContactPhone  String?   @map("emergency_contact_phone") @db.VarChar(30)
+  departmentId           String?   @map("department_id") @db.Uuid
+  positionTitle          String?   @map("position_title") @db.VarChar(150)
+  directManagerId        String?   @map("direct_manager_id") @db.Uuid
+  // ⚠️ Nullable — تا زمان تخصیص شماره پرسنلی، شرکت گروه/تاریخ استخدام هنوز مشخص نشدن
+  ourEntityId            String?   @map("our_entity_id") @db.Uuid
+  hireDate               DateTime? @map("hire_date") @db.Date
+  terminationDate        DateTime? @map("termination_date") @db.Date
+  employmentStatus       String    @default("active") @map("employment_status") @db.VarChar(20)
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  user            User?               @relation(fields: [userId], references: [id])
+  department      Department?         @relation("EmployeeDepartment", fields: [departmentId], references: [id])
+  directManager   Employee?           @relation("EmployeeManager", fields: [directManagerId], references: [id])
+  reports         Employee[]          @relation("EmployeeManager")
+  ourEntity       OurEntity?          @relation(fields: [ourEntityId], references: [id])
+  headOfDepartments Department[]      @relation("DepartmentHead")
+  contracts       EmployeeContract[]
+  attendanceRecords    AttendanceRecord[]
+  leaveBalances        LeaveBalance[]
+  leaveRequests        LeaveRequest[]    @relation("LeaveRequestEmployee")
+  leaveRequestsApproved LeaveRequest[]   @relation("LeaveRequestApprover")
+  missionRequests        MissionRequest[] @relation("MissionRequestEmployee")
+  missionRequestsApproved MissionRequest[] @relation("MissionRequestApprover")
+  overtimeRecords        OvertimeRecord[] @relation("OvertimeRecordEmployee")
+  overtimeRecordsApproved OvertimeRecord[] @relation("OvertimeRecordApprover")
+  loans                  EmployeeLoan[]   @relation("EmployeeLoanEmployee")
+  loansApproved          EmployeeLoan[]   @relation("EmployeeLoanApprover")
+  benefits               EmployeeBenefit[]
+  deductions             EmployeeDeduction[]
+  hrRequests             HrRequest[]      @relation("HrRequestEmployee")
+  hrRequestsApproved     HrRequest[]      @relation("HrRequestApprover")
+  legacyPayslips              LegacyPayslip[]
+  payrollProfile              EmployeePayrollProfile?
+  payrollWorkLogs             PayrollWorkLog[]
+  payrollResults              PayrollResult[]
+  performanceReviews          PerformanceReview[] @relation("PerformanceReviewEmployee")
+  performanceReviewsAsReviewer PerformanceReview[] @relation("PerformanceReviewReviewer")
+  children                     EmployeeChild[]
+
+  @@map("employees")
+}
+
+// فاز ۴۲ — فرزندان با تاریخ تولد؛ جایگزین EmployeePayrollProfile.childrenCount (که Deprecated شد،
+// ستون در دیتابیس باقی می‌مونه ولی دیگه توسط Pipeline خونده نمی‌شه) چون حق اولاد قانوناً فقط تا
+// سقف سنی مشخص (Rule جداگانه CHILD_ALLOWANCE_MAX_AGE، نه هاردکد) پرداخت می‌شه — بدون تاریخ تولد
+// امکان محاسبه‌ی خودکار این سقف سنی در هر دوره وجود نداشت.
+model EmployeeChild {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId String   @map("employee_id") @db.Uuid
+  fullName   String?  @map("full_name") @db.VarChar(200)
+  birthDate  DateTime @map("birth_date") @db.Date
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@map("employee_children")
+}
+
+model EmployeeContract {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId      String    @map("employee_id") @db.Uuid
+  ourEntityId     String    @map("our_entity_id") @db.Uuid
+  contractType    String    @map("contract_type") @db.VarChar(20)
+  positionTitle   String?   @map("position_title") @db.VarChar(150)
+  startDate       DateTime  @map("start_date") @db.Date
+  endDate         DateTime? @map("end_date") @db.Date
+  baseSalary      Decimal   @map("base_salary") @db.Decimal(18, 4)
+  salaryCurrency  String    @map("salary_currency") @db.VarChar(3)
+  workLocation    String?   @map("work_location") @db.VarChar(200)
+  status          String    @default("active") @db.VarChar(20)
+  fileUrl         String?   @map("file_url")
+  signedDate      DateTime? @map("signed_date") @db.Date
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  employee Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  ourEntity OurEntity @relation(fields: [ourEntityId], references: [id])
+  currency  Currency  @relation(fields: [salaryCurrency], references: [currencyCode])
+
+  @@map("employee_contracts")
+}
+
+model AttendanceRecord {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId    String    @map("employee_id") @db.Uuid
+  workDate      DateTime  @map("work_date") @db.Date
+  checkInTime   DateTime? @map("check_in_time") @db.Timestamptz
+  checkOutTime  DateTime? @map("check_out_time") @db.Timestamptz
+  status        String    @default("present") @db.VarChar(20)
+  source        String    @default("manual") @db.VarChar(20)
+  notes         String?
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, workDate])
+  @@map("attendance_records")
+}
+
+model LeaveType {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  typeName               String   @map("type_name") @db.VarChar(100)
+  isPaid                 Boolean  @default(true) @map("is_paid")
+  annualEntitlementDays  Decimal? @map("annual_entitlement_days") @db.Decimal(5, 1)
+
+  balances LeaveBalance[]
+  requests LeaveRequest[]
+
+  @@map("leave_types")
+}
+
+model LeaveBalance {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId    String   @map("employee_id") @db.Uuid
+  leaveTypeId   String   @map("leave_type_id") @db.Uuid
+  year          Int
+  entitledDays  Decimal  @map("entitled_days") @db.Decimal(5, 1)
+  usedDays      Decimal  @default(0) @map("used_days") @db.Decimal(5, 1)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id])
+
+  @@unique([employeeId, leaveTypeId, year])
+  @@map("leave_balances")
+}
+
+model LeaveRequest {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId         String    @map("employee_id") @db.Uuid
+  leaveTypeId        String    @map("leave_type_id") @db.Uuid
+  startDate          DateTime  @map("start_date") @db.Date
+  endDate            DateTime  @map("end_date") @db.Date
+  daysCount          Decimal   @map("days_count") @db.Decimal(5, 1)
+  reason             String?
+  attachmentFileUrl  String?   @map("attachment_file_url")
+  status             String    @default("pending") @db.VarChar(20)
+  approverId         String?   @map("approver_id") @db.Uuid
+  approvedAt         DateTime? @map("approved_at") @db.Timestamptz
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  employee  Employee  @relation("LeaveRequestEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id])
+  approver  Employee? @relation("LeaveRequestApprover", fields: [approverId], references: [id])
+
+  @@map("leave_requests")
+}
+
+model MissionRequest {
+  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId               String    @map("employee_id") @db.Uuid
+  destination              String    @db.VarChar(200)
+  purpose                  String?
+  startDate                DateTime  @map("start_date") @db.Date
+  endDate                  DateTime  @map("end_date") @db.Date
+  transportationMethod     String?   @map("transportation_method") @db.VarChar(50)
+  estimatedCost            Decimal?  @map("estimated_cost") @db.Decimal(18, 4)
+  currencyCode             String?   @map("currency_code") @db.VarChar(3)
+  status                   String    @default("pending") @db.VarChar(20)
+  approverId               String?   @map("approver_id") @db.Uuid
+  approvedAt               DateTime? @map("approved_at") @db.Timestamptz
+  relatedExpenseRequestId  String?   @map("related_expense_request_id") @db.Uuid
+  createdAt                DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  employee Employee  @relation("MissionRequestEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  approver Employee? @relation("MissionRequestApprover", fields: [approverId], references: [id])
+  currency Currency? @relation(fields: [currencyCode], references: [currencyCode])
+
+  @@map("mission_requests")
+}
+
+model OvertimeRecord {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId        String   @map("employee_id") @db.Uuid
+  workDate          DateTime @map("work_date") @db.Date
+  hours             Decimal  @db.Decimal(5, 2)
+  reason            String?
+  rateMultiplier    Decimal  @default(1.4) @map("rate_multiplier") @db.Decimal(4, 2)
+  calculatedAmount  Decimal? @map("calculated_amount") @db.Decimal(18, 4)
+  currencyCode      String?  @map("currency_code") @db.VarChar(3)
+  status            String   @default("pending") @db.VarChar(20)
+  approverId        String?  @map("approver_id") @db.Uuid
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  employee Employee  @relation("OvertimeRecordEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  approver Employee? @relation("OvertimeRecordApprover", fields: [approverId], references: [id])
+  currency Currency? @relation(fields: [currencyCode], references: [currencyCode])
+
+  @@map("overtime_records")
+}
+
+model EmployeeLoan {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId          String    @map("employee_id") @db.Uuid
+  loanAmount          Decimal   @map("loan_amount") @db.Decimal(18, 4)
+  currencyCode        String    @map("currency_code") @db.VarChar(3)
+  requestDate         DateTime  @default(now()) @map("request_date") @db.Date
+  reason              String?
+  installmentCount    Int       @map("installment_count")
+  monthlyInstallment  Decimal   @map("monthly_installment") @db.Decimal(18, 4)
+  startDeductionDate  DateTime? @map("start_deduction_date") @db.Date
+  status              String    @default("pending") @db.VarChar(20)
+  approverId          String?   @map("approver_id") @db.Uuid
+  approvedAt          DateTime? @map("approved_at") @db.Timestamptz
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  employee     Employee                @relation("EmployeeLoanEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  approver     Employee?               @relation("EmployeeLoanApprover", fields: [approverId], references: [id])
+  currency     Currency                @relation(fields: [currencyCode], references: [currencyCode])
+  installments EmployeeLoanInstallment[]
+  deductions   EmployeeDeduction[]
+
+  @@map("employee_loans")
+}
+
+model EmployeeLoanInstallment {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loanId               String   @map("loan_id") @db.Uuid
+  installmentNumber    Int      @map("installment_number")
+  dueDate              DateTime @map("due_date") @db.Date
+  amount               Decimal  @db.Decimal(18, 4)
+  status               String   @default("pending") @db.VarChar(20)
+  deductedInPayslipId  String?  @map("deducted_in_payslip_id") @db.Uuid
+
+  loan    EmployeeLoan   @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  payslip LegacyPayslip? @relation(fields: [deductedInPayslipId], references: [id])
+
+  @@unique([loanId, installmentNumber])
+  @@map("employee_loan_installments")
+}
+
+model BenefitType {
+  id                  String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  benefitName         String  @map("benefit_name") @db.VarChar(150)
+  isRecurringDefault  Boolean @default(true) @map("is_recurring_default")
+
+  assignments EmployeeBenefit[]
+
+  @@map("benefit_types")
+}
+
+model EmployeeBenefit {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId     String    @map("employee_id") @db.Uuid
+  benefitTypeId  String    @map("benefit_type_id") @db.Uuid
+  amount         Decimal   @db.Decimal(18, 4)
+  currencyCode   String    @map("currency_code") @db.VarChar(3)
+  effectiveFrom  DateTime  @map("effective_from") @db.Date
+  effectiveTo    DateTime? @map("effective_to") @db.Date
+  isRecurring    Boolean   @default(true) @map("is_recurring")
+  notes          String?
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  employee    Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  benefitType BenefitType @relation(fields: [benefitTypeId], references: [id])
+  currency    Currency    @relation(fields: [currencyCode], references: [currencyCode])
+
+  @@map("employee_benefits")
+}
+
+model DeductionType {
+  id                  String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deductionName       String  @map("deduction_name") @db.VarChar(150)
+  isRecurringDefault  Boolean @default(true) @map("is_recurring_default")
+
+  assignments EmployeeDeduction[]
+
+  @@map("deduction_types")
+}
+
+model EmployeeDeduction {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId       String    @map("employee_id") @db.Uuid
+  deductionTypeId  String    @map("deduction_type_id") @db.Uuid
+  amount           Decimal   @db.Decimal(18, 4)
+  currencyCode     String    @map("currency_code") @db.VarChar(3)
+  effectiveFrom    DateTime  @map("effective_from") @db.Date
+  effectiveTo      DateTime? @map("effective_to") @db.Date
+  isRecurring      Boolean   @default(true) @map("is_recurring")
+  relatedLoanId    String?   @map("related_loan_id") @db.Uuid
+  notes            String?
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  employee      Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  deductionType DeductionType @relation(fields: [deductionTypeId], references: [id])
+  currency      Currency      @relation(fields: [currencyCode], references: [currencyCode])
+  relatedLoan   EmployeeLoan? @relation(fields: [relatedLoanId], references: [id])
+
+  @@map("employee_deductions")
+}
+
+model HrRequest {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId         String    @map("employee_id") @db.Uuid
+  requestType        String    @map("request_type") @db.VarChar(30)
+  description        String
+  status             String    @default("pending") @db.VarChar(20)
+  approverId         String?   @map("approver_id") @db.Uuid
+  relatedEntityType  String?   @map("related_entity_type") @db.VarChar(30)
+  relatedEntityId    String?   @map("related_entity_id") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  employee Employee  @relation("HrRequestEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  approver Employee? @relation("HrRequestApprover", fields: [approverId], references: [id])
+
+  @@map("hr_requests")
+}
+
+// ⚠️ Deprecated (Payroll Engine فاز ۴۱) — نه خونده می‌شه نه نوشته می‌شه از این پس؛
+// فقط برای Rollback-پذیری نگه داشته شده (جدول DB دست‌نخورده مونده، فقط نام مدل Prisma عوض شده).
+// جایگزین: PayrollPeriod/PayrollResult/PayrollResultItem جدید در پایین همین فایل.
+model LegacyPayrollPeriod {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ourEntityId  String    @map("our_entity_id") @db.Uuid
+  periodMonth  Int       @map("period_month")
+  periodYear   Int       @map("period_year")
+  status       String    @default("draft") @db.VarChar(20)
+  finalizedAt  DateTime? @map("finalized_at") @db.Timestamptz
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  ourEntity OurEntity       @relation(fields: [ourEntityId], references: [id])
+  payslips  LegacyPayslip[]
+
+  @@unique([ourEntityId, periodMonth, periodYear])
+  @@map("payroll_periods")
+}
+
+model LegacyPayslip {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payrollPeriodId  String   @map("payroll_period_id") @db.Uuid
+  employeeId       String   @map("employee_id") @db.Uuid
+  baseSalary       Decimal  @map("base_salary") @db.Decimal(18, 4)
+  totalBenefits    Decimal  @default(0) @map("total_benefits") @db.Decimal(18, 4)
+  totalOvertime    Decimal  @default(0) @map("total_overtime") @db.Decimal(18, 4)
+  totalDeductions  Decimal  @default(0) @map("total_deductions") @db.Decimal(18, 4)
+  netAmount        Decimal  @map("net_amount") @db.Decimal(18, 4)
+  currencyCode     String   @map("currency_code") @db.VarChar(3)
+  fileUrl          String?  @map("file_url")
+  status           String   @default("draft") @db.VarChar(20)
+  generatedAt      DateTime @default(now()) @map("generated_at") @db.Timestamptz
+
+  payrollPeriod       LegacyPayrollPeriod       @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
+  employee            Employee                  @relation(fields: [employeeId], references: [id])
+  currency            Currency                  @relation(fields: [currencyCode], references: [currencyCode])
+  items               LegacyPayslipItem[]
+  deductedInstallments EmployeeLoanInstallment[]
+
+  @@unique([payrollPeriodId, employeeId])
+  @@map("payslips")
+}
+
+model LegacyPayslipItem {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payslipId   String  @map("payslip_id") @db.Uuid
+  itemType    String  @map("item_type") @db.VarChar(10)
+  category    String  @db.VarChar(100)
+  description String? @db.VarChar(300)
+  amount      Decimal @db.Decimal(18, 4)
+
+  payslip LegacyPayslip @relation(fields: [payslipId], references: [id], onDelete: Cascade)
+
+  @@map("payslip_items")
+}
+
+model PerformanceReviewCycle {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cycleName  String   @map("cycle_name") @db.VarChar(150)
+  startDate  DateTime @map("start_date") @db.Date
+  endDate    DateTime @map("end_date") @db.Date
+  status     String   @default("open") @db.VarChar(20)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  reviews PerformanceReview[]
+
+  @@map("performance_review_cycles")
+}
+
+model PerformanceReview {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cycleId          String    @map("cycle_id") @db.Uuid
+  employeeId       String    @map("employee_id") @db.Uuid
+  reviewerId       String    @map("reviewer_id") @db.Uuid
+  overallScore     Decimal?  @map("overall_score") @db.Decimal(5, 2)
+  selfReviewNotes  String?   @map("self_review_notes")
+  managerNotes     String?   @map("manager_notes")
+  status           String    @default("draft") @db.VarChar(20)
+  submittedAt      DateTime? @map("submitted_at") @db.Timestamptz
+  acknowledgedAt   DateTime? @map("acknowledged_at") @db.Timestamptz
+
+  cycle    PerformanceReviewCycle  @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  employee Employee                @relation("PerformanceReviewEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  reviewer Employee                @relation("PerformanceReviewReviewer", fields: [reviewerId], references: [id])
+  items    PerformanceReviewItem[]
+
+  @@unique([cycleId, employeeId])
+  @@map("performance_reviews")
+}
+
+model PerformanceReviewItem {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reviewId       String   @map("review_id") @db.Uuid
+  criterionName  String   @map("criterion_name") @db.VarChar(150)
+  weightPercent  Decimal? @map("weight_percent") @db.Decimal(5, 2)
+  score          Decimal? @db.Decimal(5, 2)
+  comments       String?
+
+  review PerformanceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@map("performance_review_items")
+}
+
+model SupplierRfq {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  rfqNumber          String   @unique @map("rfq_number") @db.VarChar(50)
+  inquiryId          String   @map("inquiry_id") @db.Uuid
+  supplierId         String   @map("supplier_id") @db.Uuid
+  ourEntityId        String   @map("our_entity_id") @db.Uuid
+  commercialExpertId String   @map("commercial_expert_id") @db.Uuid
+  emailSubject       String?  @map("email_subject") @db.VarChar(300)
+  sentDate           DateTime @map("sent_date") @db.Date
+  responseDueDate    DateTime? @map("response_due_date") @db.Date
+  status             String   @default("awaiting_response") @db.VarChar(30)
+  rejectionReason    String?  @map("rejection_reason")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  inquiry          Inquiry             @relation(fields: [inquiryId], references: [id])
+  supplier         BusinessPartner     @relation("RfqSupplier", fields: [supplierId], references: [id])
+  ourEntity        OurEntity           @relation(fields: [ourEntityId], references: [id])
+  commercialExpert User                @relation("RfqCommercialExpert", fields: [commercialExpertId], references: [id])
+  items            RfqItem[]
+  offers           SupplierOffer[]
+  sourcedDiscussions InquiryDiscussion[] @relation("DiscussionSourceRfq")
+  deleteRequests     RfqDeleteRequest[]
+
+  @@map("supplier_rfqs")
+}
+
+// فاز ۵۷ — درخواست حذف RFQ (فقط برای RFQ بدون آفر دریافتی) + تأیید/رد توسط دارندهٔ
+// rfq.approve_delete از داخل اعلان؛ هم‌الگوی shipment_edit_requests. تاریخچهٔ درخواست به‌طور
+// عمدی cascade حذف می‌شه (نه Snapshot) چون خودِ inquiry_discussions (فید فعالیت پرونده) قبل از
+// حذف واقعی RFQ متن کامل درخواست/تصمیم رو ثبت می‌کنه — همون منبع تاریخچهٔ دائمی پروژه
+model RfqDeleteRequest {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  rfqId       String    @map("rfq_id") @db.Uuid
+  reason      String
+  requestedBy String    @map("requested_by") @db.Uuid
+  status      String    @default("pending") @db.VarChar(20)
+  decidedBy   String?   @map("decided_by") @db.Uuid
+  decidedAt   DateTime? @map("decided_at") @db.Timestamptz
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  rfq       SupplierRfq @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  requester User        @relation("RfqDeleteRequestedBy", fields: [requestedBy], references: [id])
+  decider   User?       @relation("RfqDeleteDecidedBy", fields: [decidedBy], references: [id])
+
+  @@map("rfq_delete_requests")
+}
+
+model RfqItem {
+  rfqId         String @map("rfq_id") @db.Uuid
+  inquiryItemId String @map("inquiry_item_id") @db.Uuid
+
+  rfq         SupplierRfq @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  inquiryItem InquiryItem @relation(fields: [inquiryItemId], references: [id], onDelete: Cascade)
+
+  @@id([rfqId, inquiryItemId])
+  @@map("rfq_items")
+}
+
+model SupplierOffer {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  rfqId            String    @map("rfq_id") @db.Uuid
+  offerNumber      String?   @map("offer_number") @db.VarChar(100)
+  offerDate        DateTime? @map("offer_date") @db.Date
+  receivedAt       DateTime  @default(now()) @map("received_at") @db.Timestamptz
+  offerContactName String?   @map("offer_contact_name") @db.VarChar(200)
+  vatApplicable    Boolean   @default(false) @map("vat_applicable")
+  vatRatePercent   Decimal?  @map("vat_rate_percent") @db.Decimal(5, 2)
+  otherCosts       Decimal?  @default(0) @map("other_costs") @db.Decimal(18, 4)
+  distributeCosts  Boolean   @default(false) @map("distribute_costs") // Deprecated فاز ۳۵-الف — نه خونده می‌شه نه نوشته می‌شه، فقط برای Rollback باقی مونده
+  distributeVat        Boolean @default(false) @map("distribute_vat")
+  distributeOtherCosts Boolean @default(false) @map("distribute_other_costs")
+  generalRemarks   String?   @map("general_remarks")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  rfq       SupplierRfq             @relation(fields: [rfqId], references: [id])
+  items     SupplierOfferItem[]
+  documents SupplierOfferDocument[]
+
+  @@map("supplier_offers")
+}
+
+model SupplierOfferDocument {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  offerId    String   @map("offer_id") @db.Uuid
+  fileUrl    String   @map("file_url")
+  fileName   String?  @map("file_name") @db.VarChar(300)
+  uploadedAt DateTime @default(now()) @map("uploaded_at") @db.Timestamptz
+
+  offer SupplierOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@map("supplier_offer_documents")
+}
+
+model SupplierOfferItem {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  offerId           String    @map("offer_id") @db.Uuid
+  inquiryItemId     String    @map("inquiry_item_id") @db.Uuid
+  price             Decimal   @db.Decimal(18, 4)
+  currencyCode      String    @map("currency_code") @db.VarChar(3)
+  deliveryTimeDays  Int?      @map("delivery_time_days")
+  partNumber        String?   @map("part_number") @db.VarChar(200)
+  // فاز ۵۵ — برند/سازنده‌ی پیشنهادی این آفر خاص (ممکنه با builder اولیه‌ی خود استعلام فرق داشته باشه)
+  builder           String?   @map("builder") @db.VarChar(200)
+  countryOfOrigin   String?   @map("country_of_origin") @db.VarChar(100)
+  isEquivalent      Boolean   @default(false) @map("is_equivalent")
+  technicalSpecs    String?   @map("technical_specs")
+  datasheetUrl      String?   @map("datasheet_url")
+  paymentTerms      String?   @map("payment_terms")
+  offerValidityDate DateTime? @map("offer_validity_date") @db.Date
+
+  offer       SupplierOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  inquiryItem InquiryItem   @relation("OfferItemInquiryItem", fields: [inquiryItemId], references: [id])
+  currency    Currency      @relation(fields: [currencyCode], references: [currencyCode])
+  selectedFor InquiryItem[] @relation("SelectedOfferItem")
+
+  @@unique([offerId, inquiryItemId])
+  @@map("supplier_offer_items")
+}
+
+model RfqCounter {
+  year       Int @id
+  lastSerial Int @default(0) @map("last_serial")
+
+  @@map("rfq_counters")
+}
+
+model CatalogCounter {
+  id         Int @id @default(1)
+  lastSerial Int @default(0) @map("last_serial")
+
+  @@map("catalog_counters")
+}
+
+model MeasurementUnit {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  unitName  String   @unique @map("unit_name") @db.VarChar(50)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("measurement_units")
+}
+
+// گزینه‌های ترم تحویل به مشتری — فاز ۵ (جدول در baseline موجوده)
+model InquiryDeliveryOption {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  inquiryId    String   @map("inquiry_id") @db.Uuid
+  deliveryTerm String   @map("delivery_term") @db.VarChar(10)
+  extraCost    Decimal  @default(0) @map("extra_cost") @db.Decimal(18, 4)
+  deliveryDays Int      @map("delivery_days")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  inquiry Inquiry @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+
+  @@unique([inquiryId, deliveryTerm])
+  @@map("inquiry_delivery_options")
+}
+
+// ============================================================
+// دامنه ۴: پیشنهاد به مشتری — فاز ۶ (جدول‌ها در baseline موجودن)
+// ============================================================
+
+model FinancialProposal {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  proposalNumber       String    @map("proposal_number") @db.VarChar(50)
+  inquiryId            String    @map("inquiry_id") @db.Uuid
+  version              Int       @default(1)
+  status               String    @default("current") @db.VarChar(20)
+  preparedDate         DateTime  @map("prepared_date") @db.Date
+  currencyCode         String    @map("currency_code") @db.VarChar(3)
+  chosenDeliveryTerm   String    @map("chosen_delivery_term") @db.VarChar(10)
+  deliveryDays         Int       @map("delivery_days")
+  // فاز ۵۶ — واحد نمایشی زمان تحویل که کارشناس هنگام تایپ انتخاب کرده (day/week)؛ خودِ
+  // deliveryDays همیشه به روز ذخیره می‌شه، این ستون فقط برای نمایش صحیح در UI/سنده
+  deliveryDaysUnit     String    @default("day") @map("delivery_days_unit") @db.VarChar(10)
+  paymentTerms         String?   @map("payment_terms")
+  proposalValidityDate DateTime? @map("proposal_validity_date") @db.Date
+  negotiationNote      String?   @map("negotiation_note")
+  fileUrl              String?   @map("file_url")
+  sentAt               DateTime? @map("sent_at") @db.Timestamptz
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  // فاز ۳۸ — شرکت گروه صادرکننده این نسخه از پیشنهاد (برای سربرگ سند PDF/Word)
+  ourEntityId          String?   @map("our_entity_id") @db.Uuid
+  // فاز ۵۱ — Incoterm (محل تحویل) و روش حمل، برای درج در سند
+  incotermLocation     String?   @map("incoterm_location") @db.VarChar(200)
+  shippingMethod       String?   @map("shipping_method") @db.VarChar(100)
+  // فاز ۵۱ — فقط وقتی این نسخه از تبدیل ارز نسخه قبلی ساخته شده باشه پر می‌شه
+  exchangeRateFromCurrency String? @map("exchange_rate_from_currency") @db.VarChar(3)
+  exchangeRateToCurrency   String? @map("exchange_rate_to_currency") @db.VarChar(3)
+  exchangeRateValue        Decimal? @map("exchange_rate_value") @db.Decimal(18, 6)
+  // فاز ۵۲ — الهام از نمونه "Sales Order Confirmation" یک شرکت دیگه (Bitax Group)
+  paymentMethod          String?  @map("payment_method") @db.VarChar(50)
+  partialShipmentAllowed Boolean  @default(true) @map("partial_shipment_allowed")
+  documentsChecklist     String[] @default([]) @map("documents_checklist")
+  serviceTest            String?  @map("service_test") @db.VarChar(100)
+  serviceFieldService    String?  @map("service_field_service") @db.VarChar(100)
+  serviceDesign          String?  @map("service_design") @db.VarChar(100)
+  warrantyTerms          String?  @map("warranty_terms")
+  // ⚠️ عمداً جدا از negotiationNote (یادداشت داخلی مذاکره) — این متن مستقیم در سند چاپ می‌شه
+  remarks                String?
+
+  inquiry   Inquiry                  @relation(fields: [inquiryId], references: [id])
+  currency  Currency                 @relation(fields: [currencyCode], references: [currencyCode])
+  ourEntity OurEntity?               @relation(fields: [ourEntityId], references: [id])
+  items     FinancialProposalItem[]
+
+  @@unique([inquiryId, version])
+  @@map("financial_proposals")
+}
+
+model FinancialProposalItem {
+  id                  String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  financialProposalId String  @map("financial_proposal_id") @db.Uuid
+  inquiryItemId       String  @map("inquiry_item_id") @db.Uuid
+  purchasePrice       Decimal @map("purchase_price") @db.Decimal(18, 4)
+  markupPercent       Decimal @map("markup_percent") @db.Decimal(6, 3)
+  finalSalePrice      Decimal @map("final_sale_price") @db.Decimal(18, 4)
+
+  proposal    FinancialProposal @relation(fields: [financialProposalId], references: [id], onDelete: Cascade)
+  inquiryItem InquiryItem       @relation(fields: [inquiryItemId], references: [id])
+  priceChangeRequests FinancialProposalPriceChangeRequest[]
+
+  @@unique([financialProposalId, inquiryItemId])
+  @@map("financial_proposal_items")
+}
+
+/// فاز ۳۵-ج — گردش تأیید مدیر برای کاهش قیمت پیشنهاد مالی (هم‌ساختار ShipmentEditRequest، فاز ۲۷)
+model FinancialProposalPriceChangeRequest {
+  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  financialProposalItemId  String    @map("financial_proposal_item_id") @db.Uuid
+  requestedPrice           Decimal   @map("requested_price") @db.Decimal(18, 4)
+  requestedBy              String    @map("requested_by") @db.Uuid
+  status                   String    @default("pending") @db.VarChar(20)
+  decidedBy                String?   @map("decided_by") @db.Uuid
+  decidedAt                DateTime? @map("decided_at") @db.Timestamptz
+  createdAt                DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  item      FinancialProposalItem @relation(fields: [financialProposalItemId], references: [id], onDelete: Cascade)
+  requester User                  @relation("PriceChangeRequestedBy", fields: [requestedBy], references: [id])
+  decider   User?                 @relation("PriceChangeDecidedBy", fields: [decidedBy], references: [id])
+
+  @@map("financial_proposal_price_change_requests")
+}
+
+model TechnicalProposal {
+  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  proposalNumber           String    @map("proposal_number") @db.VarChar(50)
+  inquiryId                String    @map("inquiry_id") @db.Uuid
+  version                  Int       @default(1)
+  status                   String    @default("current") @db.VarChar(20)
+  preparedDate             DateTime  @map("prepared_date") @db.Date
+  deliveryTimeEstimateDays Int?      @map("delivery_time_estimate_days")
+  // فاز ۵۶ — واحد نمایشی زمان تحویل (day/week)، هم‌الگوی financial_proposals.deliveryDaysUnit
+  deliveryDaysUnit         String    @default("day") @map("delivery_days_unit") @db.VarChar(10)
+  negotiationNote          String?   @map("negotiation_note")
+  fileUrl                  String?   @map("file_url")
+  sentAt                   DateTime? @map("sent_at") @db.Timestamptz
+  createdAt                DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  // فاز ۳۸ — شرکت گروه صادرکننده این نسخه از پیشنهاد (برای سربرگ سند PDF/Word)
+  ourEntityId              String?   @map("our_entity_id") @db.Uuid
+  // فاز ۵۱ — این سه فیلد مستقل از financial_proposals نگه‌داری می‌شن (هم‌الگوی
+  // delivery_time_estimate_days که از قبل جدا بود)، چون پیشنهاد فنی می‌تونه مستقل ارسال بشه
+  chosenDeliveryTerm       String?   @map("chosen_delivery_term") @db.VarChar(10)
+  incotermLocation         String?   @map("incoterm_location") @db.VarChar(200)
+  shippingMethod           String?   @map("shipping_method") @db.VarChar(100)
+
+  inquiry   Inquiry                 @relation(fields: [inquiryId], references: [id])
+  ourEntity OurEntity?              @relation(fields: [ourEntityId], references: [id])
+  items     TechnicalProposalItem[]
+
+  @@unique([inquiryId, version])
+  @@map("technical_proposals")
+}
+
+model TechnicalProposalItem {
+  id                  String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  technicalProposalId String  @map("technical_proposal_id") @db.Uuid
+  inquiryItemId       String  @map("inquiry_item_id") @db.Uuid
+  technicalSpecs      String? @map("technical_specs")
+  complianceNote      String? @map("compliance_note")
+
+  proposal    TechnicalProposal @relation(fields: [technicalProposalId], references: [id], onDelete: Cascade)
+  inquiryItem InquiryItem       @relation(fields: [inquiryItemId], references: [id])
+
+  @@unique([technicalProposalId, inquiryItemId])
+  @@map("technical_proposal_items")
+}
+
+model RefreshToken {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash")
+  userAgent String?   @map("user_agent")
+  ipAddress String?   @map("ip_address") @db.VarChar(64)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ============================================================
+// فاز ۱۱ — ماژول سراسری «مدیریت بارها» (دامنه ۶، بخش دوم)
+// استعلام حمل + چرخه کامل ۶مرحله‌ای محموله/گمرک
+// ============================================================
+
+model FreightRfq {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  rfqNumber          String   @unique @map("rfq_number") @db.VarChar(50)
+  freightCompanyId   String   @map("freight_company_id") @db.Uuid
+  commercialExpertId String   @map("commercial_expert_id") @db.Uuid
+  destinationCustoms String   @map("destination_customs") @db.VarChar(200)
+  emailSubject       String?  @map("email_subject") @db.VarChar(300)
+  sentDate           DateTime @map("sent_date") @db.Date
+  status             String   @default("awaiting_response") @db.VarChar(30)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  freightCompany   BusinessPartner     @relation("FreightRfqCompany", fields: [freightCompanyId], references: [id])
+  commercialExpert User                @relation("FreightRfqCommercialExpert", fields: [commercialExpertId], references: [id])
+  packages         FreightRfqPackage[]
+  offers           FreightOffer[]
+
+  @@map("freight_rfqs")
+}
+
+model FreightRfqPackage {
+  freightRfqId String @map("freight_rfq_id") @db.Uuid
+  packageId    String @map("package_id") @db.Uuid
+
+  freightRfq FreightRfq @relation(fields: [freightRfqId], references: [id], onDelete: Cascade)
+  package    Package    @relation(fields: [packageId], references: [id])
+
+  @@id([freightRfqId, packageId])
+  @@map("freight_rfq_packages")
+}
+
+model FreightOffer {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  freightRfqId    String    @map("freight_rfq_id") @db.Uuid
+  price           Decimal   @db.Decimal(18, 4)
+  currencyCode    String    @map("currency_code") @db.VarChar(3)
+  transitTimeDays Int?      @map("transit_time_days")
+  offerDate       DateTime? @map("offer_date") @db.Date
+  receivedAt      DateTime  @default(now()) @map("received_at") @db.Timestamptz
+  validityDate    DateTime? @map("validity_date") @db.Date
+  notes           String?
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  freightRfq       FreightRfq @relation(fields: [freightRfqId], references: [id], onDelete: Cascade)
+  currency         Currency   @relation(fields: [currencyCode], references: [currencyCode])
+  wonShipments     Shipment[] @relation("SelectedFreightOffer")
+
+  @@map("freight_offers")
+}
+
+model Shipment {
+  id                         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shipmentNumber             String    @unique @map("shipment_number") @db.VarChar(50)
+  commercialExpertId         String    @map("commercial_expert_id") @db.Uuid
+  consolidationWarehouse     String?   @map("consolidation_warehouse") @db.VarChar(200)
+  freightCompanyId           String?   @map("freight_company_id") @db.Uuid
+  selectedFreightOfferId     String?   @map("selected_freight_offer_id") @db.Uuid
+  destinationCustoms         String?   @map("destination_customs") @db.VarChar(200)
+  stage                      String    @default("consolidating") @db.VarChar(30)
+  consolidationStartDate     DateTime? @map("consolidation_start_date") @db.Date
+  consolidationFinalizeDate  DateTime? @map("consolidation_finalize_date") @db.Date
+  billOfLadingNumber         String?   @map("bill_of_lading_number") @db.VarChar(100)
+  loadingDate                DateTime? @map("loading_date") @db.Date
+  vesselOrFlight             String?   @map("vessel_or_flight") @db.VarChar(200)
+  originPort                 String?   @map("origin_port") @db.VarChar(150)
+  destinationPort            String?   @map("destination_port") @db.VarChar(150)
+  eta                        DateTime? @db.Date
+  exportDeclarationNumber    String?   @map("export_declaration_number") @db.VarChar(100)
+  exportDeclarationFileUrl   String?   @map("export_declaration_file_url")
+  customsDeclarationNumber   String?   @map("customs_declaration_number") @db.VarChar(100)
+  customsDeclarationFileUrl  String?   @map("customs_declaration_file_url")
+  customsDutiesAmount        Decimal?  @map("customs_duties_amount") @db.Decimal(18, 4)
+  clearanceFeesAmount        Decimal?  @map("clearance_fees_amount") @db.Decimal(18, 4)
+  clearanceAgentName         String?   @map("clearance_agent_name") @db.VarChar(200)
+  weighbridgeSlipFileUrl     String?   @map("weighbridge_slip_file_url")
+  customsExitWaybillFileUrl  String?   @map("customs_exit_waybill_file_url")
+  unlockedStage              String?   @map("unlocked_stage") @db.VarChar(30)
+  createdAt                  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                  DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  commercialExpert     User             @relation("ShipmentCommercialExpert", fields: [commercialExpertId], references: [id])
+  freightCompany       BusinessPartner? @relation("ShipmentFreightCompany", fields: [freightCompanyId], references: [id])
+  selectedFreightOffer FreightOffer?    @relation("SelectedFreightOffer", fields: [selectedFreightOfferId], references: [id])
+  packages             ShipmentPackage[]
+  exportDocuments      ExportDocument?
+  importDocuments      ImportDocument?
+  warehouseReceipts    WarehouseReceipt[]
+  letters              Letter[]           @relation("LetterRelatedShipment")
+  documents            ShipmentDocument[]
+  editRequests         ShipmentEditRequest[]
+
+  @@map("shipments")
+}
+
+// فاز ۲۷ — اسناد چندفایلی محموله: هر جایگاه (doc_key) چند فایل با تاریخچهٔ آپلودکننده/زمان
+model ShipmentDocument {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shipmentId String   @map("shipment_id") @db.Uuid
+  docKey     String   @map("doc_key") @db.VarChar(50)
+  fileUrl    String   @map("file_url")
+  fileName   String?  @map("file_name") @db.VarChar(300)
+  uploadedBy String?  @map("uploaded_by") @db.Uuid
+  uploadedAt DateTime @default(now()) @map("uploaded_at") @db.Timestamptz
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  uploader User?    @relation("ShipmentDocumentUploadedBy", fields: [uploadedBy], references: [id])
+
+  @@index([shipmentId, docKey])
+  @@map("shipment_documents")
+}
+
+// فاز ۲۷ — درخواست اصلاح مرحلهٔ قفل‌شده؛ تأیید/رد از داخل اعلان (اولین استفادهٔ واقعی notifications.actions)
+model ShipmentEditRequest {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shipmentId  String    @map("shipment_id") @db.Uuid
+  stage       String    @db.VarChar(30)
+  reason      String
+  requestedBy String    @map("requested_by") @db.Uuid
+  status      String    @default("pending") @db.VarChar(20)
+  decidedBy   String?   @map("decided_by") @db.Uuid
+  decidedAt   DateTime? @map("decided_at") @db.Timestamptz
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  shipment  Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  requester User     @relation("ShipmentEditRequestedBy", fields: [requestedBy], references: [id])
+  decider   User?    @relation("ShipmentEditDecidedBy", fields: [decidedBy], references: [id])
+
+  @@map("shipment_edit_requests")
+}
+
+model ShipmentPackage {
+  shipmentId String @map("shipment_id") @db.Uuid
+  packageId  String @map("package_id") @db.Uuid
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  package  Package  @relation(fields: [packageId], references: [id])
+
+  @@id([shipmentId, packageId])
+  @@map("shipment_packages")
+}
+
+model ExportDocument {
+  id                        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shipmentId                String    @unique @map("shipment_id") @db.Uuid
+  invoiceNumber             String?   @map("invoice_number") @db.VarChar(100)
+  invoiceFileUrl            String?   @map("invoice_file_url")
+  packingListNumber         String?   @map("packing_list_number") @db.VarChar(100)
+  packingListFileUrl        String?   @map("packing_list_file_url")
+  nonDualUseCertificateUrl  String?   @map("non_dual_use_certificate_url")
+  powerOfAttorneyUrl        String?   @map("power_of_attorney_url")
+  status                    String    @default("preparing") @db.VarChar(20)
+  createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  shipment    Shipment                   @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  attachments ExportDocumentAttachment[]
+
+  @@map("export_documents")
+}
+
+model ExportDocumentAttachment {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  exportDocumentId String    @map("export_document_id") @db.Uuid
+  documentName     String?   @map("document_name") @db.VarChar(200)
+  fileUrl          String    @map("file_url")
+  issueDate        DateTime? @map("issue_date") @db.Date
+
+  exportDocument ExportDocument @relation(fields: [exportDocumentId], references: [id], onDelete: Cascade)
+
+  @@map("export_document_attachments")
+}
+
+model ImportDocument {
+  id                             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shipmentId                     String    @unique @map("shipment_id") @db.Uuid
+  tradeSystemRegistrationNumber  String?   @map("trade_system_registration_number") @db.VarChar(100)
+  tradeSystemRegistrationDate    DateTime? @map("trade_system_registration_date") @db.Date
+  insurancePolicyNumber          String?   @map("insurance_policy_number") @db.VarChar(100)
+  insuranceCompany               String?   @map("insurance_company") @db.VarChar(200)
+  insuranceAmount                Decimal?  @map("insurance_amount") @db.Decimal(18, 4)
+  insuranceIssueDate             DateTime? @map("insurance_issue_date") @db.Date
+  insuranceExpiryDate            DateTime? @map("insurance_expiry_date") @db.Date
+  importInvoiceNumber            String?   @map("import_invoice_number") @db.VarChar(100)
+  importInvoiceFileUrl           String?   @map("import_invoice_file_url")
+  importPackingListNumber        String?   @map("import_packing_list_number") @db.VarChar(100)
+  importPackingListFileUrl       String?   @map("import_packing_list_file_url")
+  billOfLadingFileUrl            String?   @map("bill_of_lading_file_url")
+  warehouseSlipNumber            String?   @map("warehouse_slip_number") @db.VarChar(100)
+  warehouseSlipFileUrl           String?   @map("warehouse_slip_file_url")
+  clearancePermitFileUrl         String?   @map("clearance_permit_file_url")
+  freightInvoiceRialNumber       String?   @map("freight_invoice_rial_number") @db.VarChar(100)
+  freightInvoiceRialFileUrl      String?   @map("freight_invoice_rial_file_url")
+  freightInvoiceForexNumber      String?   @map("freight_invoice_forex_number") @db.VarChar(100)
+  freightInvoiceForexFileUrl     String?   @map("freight_invoice_forex_file_url")
+  inspectionCertificateFileUrl   String?   @map("inspection_certificate_file_url")
+  certificateOfOriginFileUrl     String?   @map("certificate_of_origin_file_url")
+  createdAt                      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@map("import_documents")
+}
+
+model FreightRfqCounter {
+  year       Int @id
+  lastSerial Int @default(0) @map("last_serial")
+
+  @@map("freight_rfq_counters")
+}
+
+model ShipmentCounter {
+  year       Int @id
+  lastSerial Int @default(0) @map("last_serial")
+
+  @@map("shipment_counters")
+}
+
+// ============================================================
+// فاز ۱۲ — دریافت کالا در انبار (تکمیل دامنه ۶) + تحویل و تسویه (دامنه ۷)
+// ============================================================
+
+model WarehouseReceipt {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shipmentId            String    @map("shipment_id") @db.Uuid
+  receiptNumber         String    @unique @map("receipt_number") @db.VarChar(50)
+  arrivalDate           DateTime  @map("arrival_date") @db.Date
+  destinationWarehouse  String?   @map("destination_warehouse") @db.VarChar(200)
+  packagingCondition    String?   @map("packaging_condition") @db.VarChar(20)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  shipment Shipment               @relation(fields: [shipmentId], references: [id])
+  items    WarehouseReceiptItem[]
+
+  @@map("warehouse_receipts")
+}
+
+model WarehouseReceiptItem {
+  id                  String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  warehouseReceiptId  String  @map("warehouse_receipt_id") @db.Uuid
+  inquiryItemId       String  @map("inquiry_item_id") @db.Uuid
+  receivedQuantity    Decimal @map("received_quantity") @db.Decimal(18, 4)
+
+  warehouseReceipt WarehouseReceipt        @relation(fields: [warehouseReceiptId], references: [id], onDelete: Cascade)
+  inquiryItem      InquiryItem             @relation(fields: [inquiryItemId], references: [id])
+  photos           WarehouseReceiptPhoto[]
+
+  @@unique([warehouseReceiptId, inquiryItemId])
+  @@map("warehouse_receipt_items")
+}
+
+model WarehouseReceiptPhoto {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  warehouseReceiptItemId String   @map("warehouse_receipt_item_id") @db.Uuid
+  photoUrl               String   @map("photo_url")
+  uploadedAt              DateTime @default(now()) @map("uploaded_at") @db.Timestamptz
+
+  warehouseReceiptItem WarehouseReceiptItem @relation(fields: [warehouseReceiptItemId], references: [id], onDelete: Cascade)
+
+  @@map("warehouse_receipt_photos")
+}
+
+model Delivery {
+  id                        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId                   String    @map("order_id") @db.Uuid
+  actualDeliveryDate        DateTime  @map("actual_delivery_date") @db.Date
+  deliveryMethod            String?   @map("delivery_method") @db.VarChar(20)
+  recipientName             String?   @map("recipient_name") @db.VarChar(200)
+  deliveryReceiptFileUrl    String?   @map("delivery_receipt_file_url")
+  customerAcceptanceDate    DateTime? @map("customer_acceptance_date") @db.Date
+  customerAcceptanceStatus  String    @default("pending") @map("customer_acceptance_status") @db.VarChar(30)
+  createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                 DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@map("deliveries")
+}
+
+model Invoice {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoiceNumber    String    @unique @map("invoice_number") @db.VarChar(50)
+  orderId          String    @map("order_id") @db.Uuid
+  finalAmountIrr   Decimal   @map("final_amount_irr") @db.Decimal(18, 2)
+  issueDate        DateTime  @map("issue_date") @db.Date
+  paymentDeadline  DateTime? @map("payment_deadline") @db.Date
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  order       Order               @relation(fields: [orderId], references: [id])
+  items       InvoiceItem[]
+  collections InvoiceCollection[]
+
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoiceId                String   @map("invoice_id") @db.Uuid
+  description              String   @db.VarChar(200)
+  sourceCustomerPaymentId  String?  @map("source_customer_payment_id") @db.Uuid
+  amountCurrency           Decimal  @map("amount_currency") @db.Decimal(18, 4)
+  currencyCode             String   @map("currency_code") @db.VarChar(3)
+  exchangeRateDate         DateTime @map("exchange_rate_date") @db.Date
+  exchangeRateValue        Decimal  @map("exchange_rate_value") @db.Decimal(18, 4)
+  amountIrr                Decimal  @map("amount_irr") @db.Decimal(18, 2)
+
+  invoice              Invoice          @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  sourceCustomerPayment CustomerPayment? @relation(fields: [sourceCustomerPaymentId], references: [id])
+  currency             Currency         @relation(fields: [currencyCode], references: [currencyCode])
+
+  @@map("invoice_items")
+}
+
+model InvoiceCollection {
+  id                      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoiceId               String    @map("invoice_id") @db.Uuid
+  dueDate                 DateTime? @map("due_date") @db.Date
+  totalAmount             Decimal   @map("total_amount") @db.Decimal(18, 4)
+  actualReceiptDate       DateTime? @map("actual_receipt_date") @db.Date
+  paymentDocumentFileUrl  String?   @map("payment_document_file_url")
+  paymentMethod           String?   @map("payment_method") @db.VarChar(20)
+  settlementStatus        String    @default("pending") @map("settlement_status") @db.VarChar(20)
+  followUpNotes           String?   @map("follow_up_notes")
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_collections")
+}
+
+// ============================================================
+// فاز ۱۳ — مکاتبات و بایگانی اسناد (دامنه ۸)
+// ============================================================
+
+model LetterCounter {
+  year        Int    @map("year")
+  ourEntityId String @map("our_entity_id") @db.Uuid
+  lastSerial  Int    @default(0) @map("last_serial")
+
+  ourEntity OurEntity @relation(fields: [ourEntityId], references: [id])
+
+  @@id([year, ourEntityId])
+  @@map("letter_counters")
+}
+
+// فاز ۴۰-ب — شمارنده اتمیک شماره پیشنهاد مالی/فنی بر مبنای شرکت گروه صادرکننده.
+// ⚠️ Deprecated از فاز ۵۰-الف — جایگزین شد با ProposalGlobalCounter (شمارنده‌ی سراسری سالانه،
+// بدون حرف). طبق قاعده‌ی Rollback-پذیری پروژه حذف نشد؛ فقط دیگه خونده/نوشته نمی‌شه.
+model ProposalCounter {
+  year        Int    @map("year")
+  ourEntityId String @map("our_entity_id") @db.Uuid
+  lastSerial  Int    @default(0) @map("last_serial")
+
+  ourEntity OurEntity @relation(fields: [ourEntityId], references: [id])
+
+  @@id([year, ourEntityId])
+  @@map("proposal_counters")
+}
+
+// فاز ۵۰-الف — بازخورد کاربر: شماره پیشنهاد مالی/فنی باید بر مبنای سال میلادی باشه و هیچ
+// حرفی داخلش نباشه؛ جایگزین ProposalCounter (بالا) با شمارنده‌ی سراسری، هم‌الگوی InquiryCounter/RfqCounter
+// ⚠️ Deprecated از فاز ۵۱ — جایگزین شد با ProposalClientCounter (زیر). طبق قاعده‌ی
+// Rollback-پذیری پروژه حذف نشد؛ فقط دیگه خونده/نوشته نمی‌شه.
+model ProposalGlobalCounter {
+  year       Int @id
+  lastSerial Int @default(0) @map("last_serial")
+
+  @@map("proposal_global_counters")
+}
+
+// فاز ۵۱ — بازخورد کاربر: شماره پیشنهاد (و بارکد متناظرش) باید شامل سال + کد اختصاری
+// شرکت مشتری (نه شرکت گروه ما) + سریال باشه؛ جایگزین ProposalGlobalCounter
+model ProposalClientCounter {
+  year           Int    @map("year")
+  buyerPartnerId String @map("buyer_partner_id") @db.Uuid
+  lastSerial     Int    @default(0) @map("last_serial")
+
+  buyerPartner BusinessPartner @relation(fields: [buyerPartnerId], references: [id])
+
+  @@id([year, buyerPartnerId])
+  @@map("proposal_client_counters")
+}
+
+model Letter {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  letterNumber         String?   @unique @map("letter_number") @db.VarChar(50)
+  type                 String    @db.VarChar(20)
+  letterDate           DateTime  @map("letter_date") @db.Date
+  subject              String    @db.VarChar(500)
+  senderOurEntityId    String?   @map("sender_our_entity_id") @db.Uuid
+  senderPartnerId      String?   @map("sender_partner_id") @db.Uuid
+  senderContactId      String?   @map("sender_contact_id") @db.Uuid
+  receiverOurEntityId  String?   @map("receiver_our_entity_id") @db.Uuid
+  receiverPartnerId    String?   @map("receiver_partner_id") @db.Uuid
+  receiverContactId    String?   @map("receiver_contact_id") @db.Uuid
+  issuingEntityId      String    @map("issuing_entity_id") @db.Uuid
+  department           String?   @db.VarChar(100)
+  priority             String    @default("normal") @db.VarChar(20)
+  status               String    @default("draft") @db.VarChar(20)
+  relatedInquiryId     String?   @map("related_inquiry_id") @db.Uuid
+  relatedShipmentId    String?   @map("related_shipment_id") @db.Uuid
+  description          String?
+  createdBy            String    @map("created_by") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  // فاز ۲۴ — بازطراحی جهت‌محور
+  responsibleUserId        String?  @map("responsible_user_id") @db.Uuid
+  senderReferenceNumber    String?  @map("sender_reference_number") @db.VarChar(100)
+  internalFromDepartmentId String?  @map("internal_from_department_id") @db.Uuid
+  internalToDepartmentId   String?  @map("internal_to_department_id") @db.Uuid
+
+  senderOurEntity     OurEntity?       @relation("LetterSenderEntity", fields: [senderOurEntityId], references: [id])
+  senderPartner       BusinessPartner? @relation("LetterSenderPartner", fields: [senderPartnerId], references: [id])
+  senderContact       PartnerContact?  @relation("LetterSenderContact", fields: [senderContactId], references: [id])
+  receiverOurEntity   OurEntity?       @relation("LetterReceiverEntity", fields: [receiverOurEntityId], references: [id])
+  receiverPartner     BusinessPartner? @relation("LetterReceiverPartner", fields: [receiverPartnerId], references: [id])
+  receiverContact     PartnerContact?  @relation("LetterReceiverContact", fields: [receiverContactId], references: [id])
+  issuingEntity       OurEntity        @relation("LetterIssuingEntity", fields: [issuingEntityId], references: [id])
+  relatedInquiry      Inquiry?         @relation("LetterRelatedInquiry", fields: [relatedInquiryId], references: [id])
+  relatedShipment     Shipment?        @relation("LetterRelatedShipment", fields: [relatedShipmentId], references: [id])
+  creator             User             @relation("LetterCreatedBy", fields: [createdBy], references: [id])
+  responsibleUser     User?            @relation("LetterResponsibleUser", fields: [responsibleUserId], references: [id])
+  internalFromDepartment Department?   @relation("LetterInternalFromDepartment", fields: [internalFromDepartmentId], references: [id])
+  internalToDepartment   Department?   @relation("LetterInternalToDepartment", fields: [internalToDepartmentId], references: [id])
+  documents           Document[]
+  workflowLogs        LetterWorkflowLog[]
+  auditLogs           LetterAuditLog[]
+  signers             LetterSigner[]
+
+  @@map("letters")
+}
+
+model LetterSigner {
+  letterId String @map("letter_id") @db.Uuid
+  userId   String @map("user_id") @db.Uuid
+
+  letter Letter @relation(fields: [letterId], references: [id], onDelete: Cascade)
+  user   User   @relation("LetterSignerUser", fields: [userId], references: [id])
+
+  @@id([letterId, userId])
+  @@map("letter_signers")
+}
+
+model Document {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  relatedLetterId  String?  @map("related_letter_id") @db.Uuid
+  fileName         String   @map("file_name") @db.VarChar(300)
+  fileType         String   @map("file_type") @db.VarChar(20)
+  fileUrl          String   @map("file_url")
+  category         String   @default("other") @db.VarChar(30)
+  ocrText          String?  @map("ocr_text")
+  uploadedBy       String   @map("uploaded_by") @db.Uuid
+  uploadDate       DateTime @default(now()) @map("upload_date") @db.Timestamptz
+
+  relatedLetter Letter?       @relation(fields: [relatedLetterId], references: [id], onDelete: SetNull)
+  uploader      User          @relation("DocumentUploadedBy", fields: [uploadedBy], references: [id])
+  tags          DocumentTag[]
+
+  @@map("documents")
+}
+
+model DocumentTag {
+  documentId String @map("document_id") @db.Uuid
+  tag        String @db.VarChar(100)
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([documentId, tag])
+  @@map("document_tags")
+}
+
+model LetterWorkflowLog {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  letterId          String   @map("letter_id") @db.Uuid
+  action            String   @db.VarChar(30)
+  performedBy       String   @map("performed_by") @db.Uuid
+  referredToUserId  String?  @map("referred_to_user_id") @db.Uuid
+  note              String?
+  performedAt       DateTime @default(now()) @map("performed_at") @db.Timestamptz
+
+  letter       Letter @relation(fields: [letterId], references: [id], onDelete: Cascade)
+  performer    User   @relation("WorkflowPerformedBy", fields: [performedBy], references: [id])
+  referredToUser User? @relation("WorkflowReferredTo", fields: [referredToUserId], references: [id])
+
+  @@map("letter_workflow_logs")
+}
+
+model LetterAuditLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  letterId    String   @map("letter_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  action      String   @db.VarChar(20)
+  occurredAt  DateTime @default(now()) @map("occurred_at") @db.Timestamptz
+
+  letter Letter @relation(fields: [letterId], references: [id], onDelete: Cascade)
+  user   User   @relation("LetterAuditUser", fields: [userId], references: [id])
+
+  @@map("letter_audit_log")
+}
+
+// ============================================================
+// فاز ۱۴ — اعلان‌ها، یادآورها (TODO)، پیام‌رسانی سراسری (دامنه ۹)
+// ============================================================
+
+model Notification {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId             String    @map("user_id") @db.Uuid
+  type               String    @db.VarChar(40)
+  title              String    @db.VarChar(200)
+  message            String?
+  relatedEntityType  String?   @map("related_entity_type") @db.VarChar(30)
+  relatedEntityId    String?   @map("related_entity_id") @db.Uuid
+  actions            Json?
+  isRead             Boolean   @default(false) @map("is_read")
+  isActioned         Boolean   @default(false) @map("is_actioned")
+  actionedAt         DateTime? @map("actioned_at") @db.Timestamptz
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}
+
+model Activity {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  activityType           String    @map("activity_type") @db.VarChar(30)
+  subject                String    @db.VarChar(300)
+  description            String?
+  relatedEntityType      String?   @map("related_entity_type") @db.VarChar(30)
+  relatedEntityId        String?   @map("related_entity_id") @db.Uuid
+  priority               String    @default("normal") @db.VarChar(20)
+  status                 String    @default("open") @db.VarChar(20)
+  scheduledAt            DateTime? @map("scheduled_at") @db.Timestamptz
+  dueAt                  DateTime? @map("due_at") @db.Timestamptz
+  completedAt            DateTime? @map("completed_at") @db.Timestamptz
+  waitingReason          String?   @map("waiting_reason")
+  assignedToUserId       String    @map("assigned_to_user_id") @db.Uuid
+  createdByUserId        String    @map("created_by_user_id") @db.Uuid
+  outcomeNote            String?   @map("outcome_note")
+  outcomeId              String?   @map("outcome_id") @db.Uuid
+  followUpOfActivityId   String?   @map("follow_up_of_activity_id") @db.Uuid
+  callRecordingUrl       String?   @map("call_recording_url")
+  aiSummary              String?   @map("ai_summary")
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  assignedTo     User                    @relation("ActivityAssignedTo", fields: [assignedToUserId], references: [id])
+  createdBy      User                    @relation("ActivityCreatedBy", fields: [createdByUserId], references: [id])
+  followUpOf     Activity?               @relation("ActivityFollowUp", fields: [followUpOfActivityId], references: [id])
+  followUps      Activity[]              @relation("ActivityFollowUp")
+  outcome        ActivityOutcomeTemplate? @relation(fields: [outcomeId], references: [id])
+  watchers       TaskWatcher[]
+  timeline       TaskTimelineEntry[]
+
+  @@map("activities")
+}
+
+// Work Management — دنبال‌کنندگان یک Task (Watcher)؛ Creator خودکار Watcher می‌شه
+model TaskWatcher {
+  taskId        String   @map("task_id") @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  addedByUserId String   @map("added_by_user_id") @db.Uuid
+  addedAt       DateTime @default(now()) @map("added_at") @db.Timestamptz
+
+  task    Activity @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user    User     @relation("TaskWatcherUser", fields: [userId], references: [id], onDelete: Cascade)
+  addedBy User     @relation("TaskWatcherAddedBy", fields: [addedByUserId], references: [id])
+
+  @@id([taskId, userId])
+  @@map("task_watchers")
+}
+
+// Work Management — تاریخچهٔ کامل هر Task (کامنت آزاد + لاگ خودکار سیستم)، هم‌الگوی inquiry_discussions
+model TaskTimelineEntry {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  taskId     String   @map("task_id") @db.Uuid
+  entryType  String   @map("entry_type") @db.VarChar(20) // "comment" | "activity"
+  authorId   String   @map("author_id") @db.Uuid
+  entryText  String   @map("entry_text")
+  actionKind String?  @map("action_kind") @db.VarChar(30)
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  task   Activity @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author User     @relation(fields: [authorId], references: [id])
+
+  @@map("task_timeline_entries")
+}
+
+model ActivityOutcomeTemplate {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  activityType           String    @map("activity_type") @db.VarChar(30)
+  label                  String    @db.VarChar(200)
+  isDefault              Boolean   @default(false) @map("is_default")
+  requiresFollowUp       Boolean   @default(false) @map("requires_follow_up")
+  followUpActivityType   String?   @map("follow_up_activity_type") @db.VarChar(30)
+  followUpOffsetMinutes  Int?      @map("follow_up_offset_minutes")
+  // اثر ثبت این نتیجه روی Task — جایگزین منطقی requiresFollowUp (که برای سازگاری
+  // تاریخی باقی مونده، دیگه خونده نمی‌شه): close=بستن، create_follow_up=پیگیری
+  // (پیش‌فرض همون Task با سررسید جدید، مگر کاربر صراحتاً Task مستقل بخواد)،
+  // keep_waiting=انتقال به وضعیت انتظار با یک دلیل
+  effect                 String    @default("close") @db.VarChar(20)
+  createdByUserId        String?   @map("created_by_user_id") @db.Uuid
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  createdBy  User?      @relation(fields: [createdByUserId], references: [id])
+  activities Activity[]
+
+  @@unique([activityType, label])
+  @@map("activity_outcome_templates")
+}
+
+model ChatConversation {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationType String   @default("direct") @map("conversation_type") @db.VarChar(10)
+  groupName        String?  @map("group_name") @db.VarChar(150)
+  createdBy        String   @map("created_by") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  creator      User              @relation(fields: [createdBy], references: [id])
+  participants ChatParticipant[]
+  messages     ChatMessage[]
+
+  @@map("chat_conversations")
+}
+
+model ChatParticipant {
+  conversationId String    @map("conversation_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  joinedAt       DateTime  @default(now()) @map("joined_at") @db.Timestamptz
+  lastReadAt     DateTime? @map("last_read_at") @db.Timestamptz
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id])
+
+  @@id([conversationId, userId])
+  @@map("chat_participants")
+}
+
+model ChatMessage {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String    @map("conversation_id") @db.Uuid
+  senderId       String    @map("sender_id") @db.Uuid
+  messageText    String    @map("message_text")
+  fileUrl        String?   @map("file_url")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  editedAt       DateTime? @map("edited_at") @db.Timestamptz
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User             @relation(fields: [senderId], references: [id])
+
+  @@map("chat_messages")
+}
+
+// ============================================================
+// دامنه ۱۲: موتور حقوق و دستمزد قانون‌محور (Payroll Engine) — فاز ۴۱
+// ⚠️ جایگزین جداول ساده‌ی قدیمی LegacyPayrollPeriod/LegacyPayslip/LegacyPayslipItem
+// (تصمیم تأییدشده §00-الف: جایگزینی نرم — جدول‌های قدیمی Deprecated، نه حذف).
+// هیچ عدد/درصد/سقف/فرمولی هاردکد نیست؛ همه از PayrollRule/PayrollTaxBracket/Formula خونده می‌شه.
+// ============================================================
+
+model PayrollYear {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  yearNumber   Int      @unique @map("year_number")
+  calendarType String   @default("jalali") @map("calendar_type") @db.VarChar(10) // jalali | gregorian
+  status       String   @default("open") @db.VarChar(20) // open | closed
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  ruleVersions PayrollRuleVersion[]
+  periods      PayrollPeriod[]
+
+  @@map("payroll_years")
+}
+
+model PayrollRuleVersion {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payrollYearId String    @map("payroll_year_id") @db.Uuid
+  versionNumber Int       @map("version_number")
+  title         String    @db.VarChar(200) // مثلاً "1406 Version 1"
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+  status        String    @default("draft") @db.VarChar(20) // draft | active | superseded
+  createdById   String?   @map("created_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  payrollYear PayrollYear         @relation(fields: [payrollYearId], references: [id])
+  createdBy   User?               @relation(fields: [createdById], references: [id])
+  rules       PayrollRule[]
+  brackets    PayrollTaxBracket[]
+  formulas    Formula[]
+  periods     PayrollPeriod[]
+  defaultForProfiles EmployeePayrollProfile[]
+
+  @@unique([payrollYearId, versionNumber])
+  @@map("payroll_rule_versions")
+}
+
+model PayrollRule {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ruleVersionId String    @map("rule_version_id") @db.Uuid
+  code          String    @db.VarChar(100) // MIN_WAGE, HOUSING_ALLOWANCE, INSURANCE_RATE_EMPLOYEE, INSURANCE_CEILING, ...
+  title         String    @db.VarChar(300)
+  valueType     String    @map("value_type") @db.VarChar(20) // number | percent | boolean
+  value         Decimal   @db.Decimal(18, 4)
+  effectiveDate DateTime  @map("effective_date") @db.Date
+  expireDate    DateTime? @map("expire_date") @db.Date
+  description   String?
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  ruleVersion PayrollRuleVersion @relation(fields: [ruleVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleVersionId, code])
+  @@map("payroll_rules")
+}
+
+// پله‌های مالیات پلکانی — ذاتاً چندردیفی است، در قالب PayrollRule تک‌مقداره جا نمی‌شود
+model PayrollTaxBracket {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ruleVersionId String   @map("rule_version_id") @db.Uuid
+  bracketOrder  Int      @map("bracket_order")
+  fromAmount    Decimal  @map("from_amount") @db.Decimal(18, 4)
+  toAmount      Decimal? @map("to_amount") @db.Decimal(18, 4) // null = آخرین پله، بدون سقف
+  ratePercent   Decimal  @map("rate_percent") @db.Decimal(5, 2)
+
+  ruleVersion PayrollRuleVersion @relation(fields: [ruleVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleVersionId, bracketOrder])
+  @@map("payroll_tax_brackets")
+}
+
+model Formula {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ruleVersionId String   @map("rule_version_id") @db.Uuid
+  code          String   @db.VarChar(100)
+  expression    String   @db.Text // "BASE + HOUSE + FOOD" یا "IF(CHILDREN>0, CHILDREN*CHILD_ALLOWANCE, 0)"
+  description   String?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  ruleVersion PayrollRuleVersion @relation(fields: [ruleVersionId], references: [id], onDelete: Cascade)
+  components  PayrollComponent[]
+
+  @@unique([ruleVersionId, code])
+  @@map("payroll_formulas")
+}
+
+model PayrollComponent {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code          String   @unique @db.VarChar(50) // BASE, HOUSE, FOOD, CHILD, SENIORITY, OVERTIME, NIGHT, HOLIDAY, BONUS, INSURANCE, TAX, LOAN, ADVANCE, OTHER
+  title         String   @db.VarChar(200)
+  componentType String   @map("component_type") @db.VarChar(10) // earning | deduction
+  isInsurable   Boolean  @default(false) @map("is_insurable")
+  isTaxable     Boolean  @default(false) @map("is_taxable")
+  calcOrder     Int      @default(0) @map("calc_order") // راهنمای نمایش؛ ترتیب واقعی محاسبه از Dependency Engine می‌آید
+  formulaId     String?  @map("formula_id") @db.Uuid
+  status        String   @default("active") @db.VarChar(20)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  formula     Formula?            @relation(fields: [formulaId], references: [id])
+  resultItems PayrollResultItem[]
+
+  @@map("payroll_components")
+}
+
+// عمداً باریک نگه داشته شده — حقوق پایه/نوع قرارداد از employee_contracts، تأهل از employees خوانده می‌شود
+model EmployeePayrollProfile {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId           String    @unique @map("employee_id") @db.Uuid
+  seniorityBaseDate    DateTime? @map("seniority_base_date") @db.Date // پیش‌فرض = hire_date؛ فقط برای override دستی پر می‌شود
+  childrenCount        Int       @default(0) @map("children_count") // ⚠️ Deprecated فاز ۴۲ — جایگزین شد با EmployeeChild (تاریخ تولد)؛ ستون برای Rollback باقی مانده، دیگر توسط Pipeline خوانده نمی‌شود
+  insuranceNumber      String?   @map("insurance_number") @db.VarChar(50)
+  costCenterDeptId     String?   @map("cost_center_dept_id") @db.Uuid
+  defaultRuleVersionId String?   @map("default_rule_version_id") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  employee    Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  costCenter  Department?         @relation(fields: [costCenterDeptId], references: [id])
+  defaultRule PayrollRuleVersion? @relation(fields: [defaultRuleVersionId], references: [id])
+
+  @@map("employee_payroll_profiles")
+}
+
+model PayrollPeriod {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payrollYearId String   @map("payroll_year_id") @db.Uuid
+  periodCode    String   @unique @map("period_code") @db.VarChar(10) // "1406-01"
+  monthNumber   Int      @map("month_number")
+  ruleVersionId String   @map("rule_version_id") @db.Uuid // کدام نسخه‌ی قانون برای این ماه معتبر است — ثابت پس از ساخت
+  status        String   @default("open") @db.VarChar(20) // open | closed
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  payrollYear PayrollYear        @relation(fields: [payrollYearId], references: [id])
+  ruleVersion PayrollRuleVersion @relation(fields: [ruleVersionId], references: [id])
+  workLogs    PayrollWorkLog[]
+  results     PayrollResult[]
+
+  @@map("payroll_periods_v2") // نام‌گذاری متفاوت از جدول قدیمی payroll_periods (اکنون LegacyPayrollPeriod)
+}
+
+// Snapshot تجمیعی خودکار از attendance_records/leave_requests/overtime_records/mission_requests
+// (تصمیم تأییدشده §00-ب) — با قابلیت اصلاح دستی برای موارد استثنا (source='manual')
+model PayrollWorkLog {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payrollPeriodId   String   @map("payroll_period_id") @db.Uuid
+  employeeId        String   @map("employee_id") @db.Uuid
+  workedDays        Decimal  @default(0) @map("worked_days") @db.Decimal(5, 2)
+  overtimeHours     Decimal  @default(0) @map("overtime_hours") @db.Decimal(6, 2)
+  nightHours        Decimal  @default(0) @map("night_hours") @db.Decimal(6, 2)
+  fridayHours       Decimal  @default(0) @map("friday_hours") @db.Decimal(6, 2)
+  holidayHours      Decimal  @default(0) @map("holiday_hours") @db.Decimal(6, 2)
+  missionDays       Decimal  @default(0) @map("mission_days") @db.Decimal(5, 2)
+  leaveDays         Decimal  @default(0) @map("leave_days") @db.Decimal(5, 2)
+  absenceDays       Decimal  @default(0) @map("absence_days") @db.Decimal(5, 2)
+  latenessMinutes   Int      @default(0) @map("lateness_minutes")
+  earlyLeaveMinutes Int      @default(0) @map("early_leave_minutes")
+  requiredHours     Decimal  @default(0) @map("required_hours") @db.Decimal(6, 2)
+  workedHours       Decimal  @default(0) @map("worked_hours") @db.Decimal(6, 2)
+  source            String   @default("auto_aggregated") @db.VarChar(20) // auto_aggregated | manual
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  payrollPeriod PayrollPeriod @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
+  employee      Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([payrollPeriodId, employeeId])
+  @@map("payroll_work_logs")
+}
+
+model PayrollResult {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payrollPeriodId        String    @map("payroll_period_id") @db.Uuid
+  employeeId             String    @map("employee_id") @db.Uuid
+  status                 String    @default("draft") @db.VarChar(20) // draft|calculated|reviewed|approved|posted|locked
+  grossEarnings          Decimal   @default(0) @map("gross_earnings") @db.Decimal(18, 4)
+  totalDeductions        Decimal   @default(0) @map("total_deductions") @db.Decimal(18, 4)
+  insuranceEmployeeShare Decimal   @default(0) @map("insurance_employee_share") @db.Decimal(18, 4)
+  insuranceEmployerShare Decimal   @default(0) @map("insurance_employer_share") @db.Decimal(18, 4)
+  unemploymentInsurance  Decimal   @default(0) @map("unemployment_insurance") @db.Decimal(18, 4)
+  taxAmount              Decimal   @default(0) @map("tax_amount") @db.Decimal(18, 4)
+  netSalary              Decimal   @default(0) @map("net_salary") @db.Decimal(18, 4)
+  employerCost           Decimal   @default(0) @map("employer_cost") @db.Decimal(18, 4)
+  calculatedAt           DateTime? @map("calculated_at") @db.Timestamptz
+  calculatedBy           String?   @map("calculated_by") @db.Uuid
+  reviewedAt             DateTime? @map("reviewed_at") @db.Timestamptz
+  reviewedBy             String?   @map("reviewed_by") @db.Uuid
+  approvedAt             DateTime? @map("approved_at") @db.Timestamptz
+  approvedBy             String?   @map("approved_by") @db.Uuid
+  postedAt               DateTime? @map("posted_at") @db.Timestamptz
+  postedBy               String?   @map("posted_by") @db.Uuid
+  lockedAt               DateTime? @map("locked_at") @db.Timestamptz
+  lockedBy               String?   @map("locked_by") @db.Uuid
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  payrollPeriod PayrollPeriod       @relation(fields: [payrollPeriodId], references: [id])
+  employee      Employee            @relation(fields: [employeeId], references: [id])
+  items         PayrollResultItem[]
+
+  @@unique([payrollPeriodId, employeeId])
+  @@map("payroll_results")
+}
+
+// هر ردیف یک Snapshot است — حتی اگر بعداً عنوان Component یا متن فرمول عوض شود، تاریخچه دست‌نخورده می‌ماند
+model PayrollResultItem {
+  id              String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payrollResultId String  @map("payroll_result_id") @db.Uuid
+  componentId     String  @map("component_id") @db.Uuid
+  componentCode   String  @map("component_code") @db.VarChar(50)
+  amount          Decimal @db.Decimal(18, 4)
+  calcOrder       Int     @map("calc_order")
+  formulaSnapshot String? @map("formula_snapshot") @db.Text
+
+  payrollResult PayrollResult    @relation(fields: [payrollResultId], references: [id], onDelete: Cascade)
+  component     PayrollComponent @relation(fields: [componentId], references: [id])
+
+  @@map("payroll_result_items")
+}
+
+model PayrollAuditLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityType  String   @map("entity_type") @db.VarChar(50)
+  entityId    String   @map("entity_id") @db.Uuid
+  action      String   @db.VarChar(20) // created | updated | deleted | status_changed
+  fieldName   String?  @map("field_name") @db.VarChar(100)
+  oldValue    String?  @map("old_value")
+  newValue    String?  @map("new_value")
+  performedBy String   @map("performed_by") @db.Uuid
+  performedAt DateTime @default(now()) @map("performed_at") @db.Timestamptz
+
+  performedByUser User @relation(fields: [performedBy], references: [id])
+
+  @@index([entityType, entityId])
+  @@map("payroll_audit_log")
+}
+
+// فاز ۴۱-ب — تنظیمات سراسری سامانه (تک‌ردیفی، الگوی CatalogCounter)
+model SiteSettings {
+  id                 Int       @id @default(1)
+  loginBackgroundUrl String?   @map("login_background_url")
+  updatedBy          String?   @map("updated_by") @db.Uuid
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  updater User? @relation("SiteSettingsUpdatedBy", fields: [updatedBy], references: [id])
+
+  @@map("site_settings")
+}
+
+// فاز ۴۱-ج — پیام اعلامی مدیر در بدو ورود. بدون فن‌اوت رکورد در لحظه ایجاد؛
+// کوئری «پیام‌های در انتظار من» در لحظه (BroadcastMessagesService.getPending) بررسی می‌شه.
+model BroadcastMessage {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  imageUrl      String?  @map("image_url")
+  message       String
+  targetType    String   @map("target_type") @db.VarChar(10) // "user" | "group" | "all"
+  targetUserId  String?  @map("target_user_id") @db.Uuid
+  targetGroupId String?  @map("target_group_id") @db.Uuid
+  active        Boolean  @default(true)
+  createdBy     String   @map("created_by") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  creator     User             @relation("BroadcastCreatedBy", fields: [createdBy], references: [id])
+  targetUser  User?            @relation("BroadcastTargetUser", fields: [targetUserId], references: [id])
+  targetGroup PermissionGroup? @relation("BroadcastTargetGroup", fields: [targetGroupId], references: [id])
+  dismissals  BroadcastMessageDismissal[]
+
+  @@map("broadcast_messages")
+}
+
+model BroadcastMessageDismissal {
+  broadcastMessageId String   @map("broadcast_message_id") @db.Uuid
+  userId             String   @map("user_id") @db.Uuid
+  dismissedAt        DateTime @default(now()) @map("dismissed_at") @db.Timestamptz
+
+  broadcastMessage BroadcastMessage @relation(fields: [broadcastMessageId], references: [id], onDelete: Cascade)
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([broadcastMessageId, userId])
+  @@map("broadcast_message_dismissals")
+}

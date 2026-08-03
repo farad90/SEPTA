@@ -1,0 +1,11 @@
+# ⚠️ بدون "**/" این الگوها فقط سطح ریشه رو مستثنی می‌کنن، نه apps/api/node_modules و
+# apps/web/node_modules رو — که باعث می‌شه COPY . . نودمجولاس هاست (با Symlink مطلق
+# ویندوزی) رو روی نودمجولاس درست‌ساخته‌شده داخل Image بازنویسی کنه (باگ واقعی که پیدا شد)
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/generated
+.git
+.env
+.env.*.local

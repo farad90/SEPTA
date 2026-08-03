@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>سپتا — سامانه یکپارچه پولاد تجهیز آپادانا</title>
+    <script>
+      // فاز ۴۱-الف: اعمال تنظیمات ظاهری ذخیره‌شده قبل از mount شدن React — جلوگیری از فلش تم پیش‌فرض
+      (function () {
+        try {
+          var raw = localStorage.getItem("septa:appearance");
+          if (!raw) return;
+          var s = JSON.parse(raw);
+          var root = document.documentElement;
+          if (s.palette) root.setAttribute("data-palette", s.palette);
+          if (s.darkMode) root.classList.add("dark");
+          var sizes = { small: 14, medium: 16, large: 18 };
+          if (s.fontSize && sizes[s.fontSize]) root.style.fontSize = sizes[s.fontSize] + "px";
+          var fonts = {
+            vazirmatn: '"Vazirmatn", sans-serif',
+            cairo: '"Cairo", "Vazirmatn", sans-serif',
+            notoSansArabic: '"Noto Sans Arabic", "Vazirmatn", sans-serif',
+          };
+          if (s.fontFamily && fonts[s.fontFamily]) root.style.setProperty("--font-fa", fonts[s.fontFamily]);
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

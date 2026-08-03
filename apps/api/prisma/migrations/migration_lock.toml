@@ -1,0 +1,2 @@
+# این فایل توسط Prisma Migrate مدیریت می‌شه. دستی ویرایشش نکن.
+provider = "postgresql"

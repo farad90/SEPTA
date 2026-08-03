@@ -1,0 +1,21 @@
+{
+  "name": "septa-erp",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=18.12.0"
+  },
+  "packageManager": "pnpm@8.15.9",
+  "scripts": {
+    "dev": "pnpm --parallel --filter ./apps/* run dev",
+    "dev:api": "pnpm --filter api run dev",
+    "dev:web": "pnpm --filter web run dev",
+    "build": "pnpm --filter ./apps/* run build",
+    "test": "pnpm --filter ./apps/* run test",
+    "lint": "pnpm --filter ./apps/* run lint",
+    "migrate": "pnpm --filter api run migrate:deploy",
+    "seed": "pnpm --filter api run seed",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  }
+}
