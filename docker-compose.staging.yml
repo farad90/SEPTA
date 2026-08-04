@@ -1,0 +1,83 @@
+# P1-E1-F3-T4 — Staging: a production-mirroring environment that catches problems
+# before customers do. Runs on its own, separate host from Production — never
+# the same VPS, never sharing a database or uploads volume with it.
+#
+# ⚠️ Unlike docker-compose.prod.yml (which still `build:`s images locally on the
+# host), staging pulls the pre-built, commit-SHA-tagged images that the
+# `build-and-push` job in .github/workflows/ci.yml already published to GHCR —
+# this is the first real consumer of that pipeline (P1-E1-F2-T2). Production
+# should eventually move to the same pull-a-tagged-image pattern; that migration
+# is intentionally not bundled into this task to keep this PR reviewable on its
+# own — track it as a fast-follow once this pattern is proven here.
+#
+# Deploy (run on the staging host, or via the deploy-staging.yml CI workflow):
+#   GHCR_IMAGE_BASE=ghcr.io/<owner>/<repo> IMAGE_TAG=<commit-sha> \
+#     docker compose --env-file .env.staging -f docker-compose.staging.yml pull
+#   GHCR_IMAGE_BASE=ghcr.io/<owner>/<repo> IMAGE_TAG=<commit-sha> \
+#     docker compose --env-file .env.staging -f docker-compose.staging.yml up -d
+#
+# ⚠️ No TLS yet — same gap Production currently has (P0-E1-F1-T1, not yet done
+# in this environment). Once Caddy is added in front of Production, mirror the
+# same setup here so staging behavior matches production behavior as closely
+# as possible — that's the whole point of a staging environment.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: septa_staging_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: septa
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: septa
+    volumes:
+      - septa_staging_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U septa -d septa"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Same one-shot migration pattern introduced for Production in P1-E1-F2-T3.
+  migrate:
+    image: ${GHCR_IMAGE_BASE}/api:${IMAGE_TAG:-latest}
+    container_name: septa_staging_migrate
+    restart: "no"
+    env_file:
+      - apps/api/.env.staging
+    environment:
+      DATABASE_URL: postgresql://septa:${POSTGRES_PASSWORD}@postgres:5432/septa?schema=public
+    working_dir: /app/apps/api
+    entrypoint: ["npx", "prisma", "migrate", "deploy"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    image: ${GHCR_IMAGE_BASE}/api:${IMAGE_TAG:-latest}
+    container_name: septa_staging_api
+    restart: unless-stopped
+    env_file:
+      - apps/api/.env.staging
+    environment:
+      DATABASE_URL: postgresql://septa:${POSTGRES_PASSWORD}@postgres:5432/septa?schema=public
+    volumes:
+      - septa_staging_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    image: ${GHCR_IMAGE_BASE}/web:${IMAGE_TAG:-latest}
+    container_name: septa_staging_web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+
+volumes:
+  septa_staging_postgres_data:
+  septa_staging_uploads:

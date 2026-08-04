@@ -1,0 +1,44 @@
+name: Deploy to Staging
+
+# P1-E1-F3-T4 — every merge to main deploys automatically to staging (never to
+# production — that stays a manual promotion step, deliberately, as the safety
+# gate). Runs after ci.yml's build-and-push job has published a tagged image.
+#
+# ⚠️ Requires these repository secrets to be configured before this workflow can
+# actually run (Settings → Secrets and variables → Actions):
+#   STAGING_SSH_HOST  — the staging VPS's address
+#   STAGING_SSH_USER  — a deploy user on that host (not root — see P1-E1-F2-T2's
+#                        note on privilege separation; this workflow assumes that
+#                        hardening has already happened)
+#   STAGING_SSH_KEY   — the private key for that user
+# None of these exist yet in this environment — provisioning the actual staging
+# VPS and wiring these secrets is infrastructure work outside what can be done
+# from a code change alone. This workflow is code-complete and ready to run the
+# moment that infrastructure exists.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy staging
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.STAGING_SSH_HOST }}
+          username: ${{ secrets.STAGING_SSH_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/septa-staging
+            export GHCR_IMAGE_BASE=ghcr.io/${{ github.repository }}
+            export IMAGE_TAG=${{ github.event.workflow_run.head_sha }}
+            docker compose --env-file .env.staging -f docker-compose.staging.yml pull
+            docker compose --env-file .env.staging -f docker-compose.staging.yml up -d
+            docker image prune -f
