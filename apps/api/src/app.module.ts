@@ -35,9 +35,11 @@ import { ReportsModule } from "./reports/reports.module";
 import { SiteSettingsModule } from "./site-settings/site-settings.module";
 import { BroadcastMessagesModule } from "./broadcast-messages/broadcast-messages.module";
 import { HealthModule } from "./health/health.module";
+import { LoggingModule } from "./common/logging/logging.module";
 
 @Module({
   imports: [
+    LoggingModule,
     ConfigModule.forRoot({
       isGlobal: true,
       validate: validateEnv,
