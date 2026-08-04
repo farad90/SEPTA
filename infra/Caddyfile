@@ -1,0 +1,15 @@
+# P0-E1-F1-T1 — TLS termination. Caddy handles Let's Encrypt provisioning and
+# renewal automatically for whatever {$DOMAIN} resolves to; HTTP→HTTPS
+# redirect and HSTS are Caddy defaults, no extra config needed for those.
+#
+# ⚠️ Let's Encrypt (and therefore Caddy's automatic HTTPS) cannot issue a
+# certificate for a bare IP address — DOMAIN must be a real hostname that
+# resolves to this VPS's public IP. If the business doesn't have a domain
+# yet, https://nip.io provides free wildcard DNS for exactly this case:
+# `<ip-with-dashes-instead-of-dots>.nip.io` (e.g. 203-0-113-10.nip.io)
+# resolves to that IP with zero setup — good enough to get a real,
+# browser-trusted certificate today, swap to a real domain later without
+# touching this file (only DOMAIN in .env.production changes).
+{$DOMAIN} {
+	reverse_proxy web:80
+}

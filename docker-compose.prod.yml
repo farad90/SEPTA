@@ -3,6 +3,10 @@
 #
 # ⚠️ برخلاف docker-compose.yml (توسعه): پورت پستگرس و API مستقیم به بیرون منتشر نمی‌شن —
 # فقط سرویس web (nginx، پورت ۸۰) از بیرون در دسترسه؛ بقیه فقط داخل شبکه Docker.
+#
+# P0-E1-F1-T1 -- TLS now terminates at a new 'caddy' service in front of
+# 'web'; only caddy (ports 80/443) is published to the host. web/api/
+# postgres/redis all stay internal-network-only.
 
 services:
   postgres:
@@ -105,12 +109,33 @@ services:
       dockerfile: apps/web/Dockerfile
     container_name: septa_web
     restart: unless-stopped
-    ports:
-      - "80:80"
+    # P0-E1-F1-T1 — no longer publishes port 80 to the host directly; Caddy
+    # is now the only thing exposed, terminating TLS in front of it.
     depends_on:
       - api
+
+  # P0-E1-F1-T1 — TLS termination. Only Caddy is published to the host now;
+  # web (nginx) and api stay internal-network-only, same policy postgres/
+  # redis already had.
+  caddy:
+    image: caddy:2-alpine
+    container_name: septa_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - septa_caddy_data:/data
+      - septa_caddy_config:/config
+    depends_on:
+      - web
 
 volumes:
   septa_postgres_data:
   septa_uploads:
   septa_redis_data:
+  septa_caddy_data:
+  septa_caddy_config:
