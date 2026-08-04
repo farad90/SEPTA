@@ -21,6 +21,26 @@ services:
       timeout: 5s
       retries: 10
 
+  # P1-E1-F2-T3 — migrations are now part of the deploy graph, not a manual step an
+  # operator has to remember. This is a one-shot job (runs once per `docker compose up`,
+  # exits 0, is not itself a long-running service) that `api` waits on below via
+  # `service_completed_successfully` — requires Docker Compose v2.20+.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: septa_migrate
+    restart: "no"
+    env_file:
+      - apps/api/.env.production
+    environment:
+      DATABASE_URL: postgresql://septa:${POSTGRES_PASSWORD}@postgres:5432/septa?schema=public
+    working_dir: /app/apps/api
+    entrypoint: ["npx", "prisma", "migrate", "deploy"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build:
       context: .
@@ -39,6 +59,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # اگه migrate شکست بخوره (خطای Migration)، api اصلاً بالا نمیاد — به‌جای اینکه
+      # با اسکیمای قدیمی روی داده جدید اجرا بشه و خطای ناشناخته بده
+      migrate:
+        condition: service_completed_successfully
 
   web:
     build:
