@@ -61,6 +61,23 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # P1-E4-F2-T2 — dependency vulnerability scanning. Report-only for now
+      # (continue-on-error), NOT a blocking gate: as of this task, the
+      # existing dependency tree already has 41 known advisories (1 critical
+      # — vitest's UI-server RCE, irrelevant here since this project only
+      # ever runs `vitest run`, never the UI server; 18 high, mostly a
+      # transitive brace-expansion ReDoS pulled in via eslint/@nestjs/cli/
+      # exceljs's dependency chains, not directly controllable without
+      # upgrading those top-level packages — several of which are major-
+      # version bumps with real breaking-change risk). Blocking merges on
+      # pre-existing debt this task merely discovered, rather than
+      # introduced, isn't the right call — Dependabot (configured alongside
+      # this) will propose the actual fixes incrementally instead. Revisit
+      # turning this into a hard gate once that backlog is worked down.
+      - name: Dependency audit (report-only)
+        continue-on-error: true
+        run: pnpm audit --audit-level=high
+
   # P1-E1-F2-T2 — build and tag Docker images in CI on merge to main.
   # Replaces the old "tar the repo and scp it to the VPS as root" deploy path
   # with tagged, provenance-tracked images: `docker inspect <image>` can now
