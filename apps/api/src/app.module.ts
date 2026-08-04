@@ -34,6 +34,7 @@ import { PayrollModule } from "./payroll/payroll.module";
 import { ReportsModule } from "./reports/reports.module";
 import { SiteSettingsModule } from "./site-settings/site-settings.module";
 import { BroadcastMessagesModule } from "./broadcast-messages/broadcast-messages.module";
+import { HealthModule } from "./health/health.module";
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { BroadcastMessagesModule } from "./broadcast-messages/broadcast-messages
     }),
     ScheduleModule.forRoot(),
     PrismaModule,
+    HealthModule,
     PermissionsModule,
     AuthModule,
     UsersModule,
