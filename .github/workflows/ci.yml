@@ -1,0 +1,62 @@
+name: CI
+
+# P1-E1-F1-T1 — every push and PR gets an automated lint/test/build gate.
+# Previously there was no CI at all; the 34+ backend unit tests only ran
+# if a developer remembered to run them locally.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same branch/PR to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Dummy values only — satisfy env.validation.ts's required fields (DATABASE_URL,
+  # CORS_ORIGIN, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET) in case any test bootstraps
+  # the full ConfigModule. Never real secrets; CI never talks to a real database.
+  DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_placeholder?schema=public"
+  CORS_ORIGIN: "http://localhost:5173"
+  JWT_ACCESS_SECRET: "ci-only-placeholder-access-secret-not-real"
+  JWT_REFRESH_SECRET: "ci-only-placeholder-refresh-secret-not-real"
+
+jobs:
+  ci:
+    name: Lint, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack (for the pinned pnpm version)
+        run: corepack enable
+
+      - name: Setup Node.js (version pinned in .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # Prisma Client is generated into apps/api/generated/prisma, which is
+      # gitignored — nest build and ts-jest both fail to type-check without it.
+      - name: Generate Prisma Client
+        run: pnpm --filter api exec prisma generate
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test — API (Jest)
+        run: pnpm --filter api run test
+
+      - name: Test — Web (Vitest)
+        run: pnpm --filter web run test
+
+      - name: Build
+        run: pnpm build

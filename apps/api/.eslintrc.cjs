@@ -21,5 +21,9 @@ module.exports = {
     "@typescript-eslint/explicit-function-return-type": "off",
     "@typescript-eslint/explicit-module-boundary-types": "off",
     "@typescript-eslint/no-explicit-any": "off",
+    // Underscore-prefixed params/vars are the established convention in this codebase
+    // for "intentionally unused" (e.g. interface-required parameters some
+    // implementations don't need) — was never actually wired into the lint rule.
+    "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
   },
 };
