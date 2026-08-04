@@ -21,6 +21,23 @@ services:
       timeout: 5s
       retries: 10
 
+  # P1-E3-F1-T1 — Redis: cache/queue/pub-sub infrastructure for Phase 2 work;
+  # not used for anything yet beyond the health check. Password-protected,
+  # not published to the host (same "internal-network-only" policy as
+  # postgres above).
+  redis:
+    image: redis:7-alpine
+    container_name: septa_redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - septa_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   # P1-E1-F2-T3 — migrations are now part of the deploy graph, not a manual step an
   # operator has to remember. This is a one-shot job (runs once per `docker compose up`,
   # exits 0, is not itself a long-running service) that `api` waits on below via
@@ -52,12 +69,15 @@ services:
     environment:
       # داخل شبکه Docker هاست پستگرس "postgres" است، نه localhost
       DATABASE_URL: postgresql://septa:${POSTGRES_PASSWORD}@postgres:5432/septa?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
     volumes:
       # ⚠️ StorageService با process.cwd() کار می‌کنه؛ چون CMD از WORKDIR /app اجرا می‌شه،
       # مسیر واقعی /app/uploads است (نه apps/api/uploads) — این مسیر باید دقیق بمونه
       - septa_uploads:/app/uploads
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       # اگه migrate شکست بخوره (خطای Migration)، api اصلاً بالا نمیاد — به‌جای اینکه
       # با اسکیمای قدیمی روی داده جدید اجرا بشه و خطای ناشناخته بده
@@ -93,3 +113,4 @@ services:
 volumes:
   septa_postgres_data:
   septa_uploads:
+  septa_redis_data:

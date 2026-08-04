@@ -36,6 +36,7 @@ import { SiteSettingsModule } from "./site-settings/site-settings.module";
 import { BroadcastMessagesModule } from "./broadcast-messages/broadcast-messages.module";
 import { HealthModule } from "./health/health.module";
 import { LoggingModule } from "./common/logging/logging.module";
+import { RedisModule } from "./common/redis/redis.module";
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { LoggingModule } from "./common/logging/logging.module";
     }),
     ScheduleModule.forRoot(),
     PrismaModule,
+    RedisModule,
     HealthModule,
     PermissionsModule,
     AuthModule,

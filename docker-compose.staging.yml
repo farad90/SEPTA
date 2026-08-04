@@ -38,6 +38,21 @@ services:
       timeout: 5s
       retries: 10
 
+  # P1-E3-F1-T1 — same Redis setup as production; must use its own
+  # REDIS_PASSWORD, never production's.
+  redis:
+    image: redis:7-alpine
+    container_name: septa_staging_redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - septa_staging_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   # Same one-shot migration pattern introduced for Production in P1-E1-F2-T3.
   migrate:
     image: ${GHCR_IMAGE_BASE}/api:${IMAGE_TAG:-latest}
@@ -61,13 +76,30 @@ services:
       - apps/api/.env.staging
     environment:
       DATABASE_URL: postgresql://septa:${POSTGRES_PASSWORD}@postgres:5432/septa?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
     volumes:
       - septa_staging_uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    # Mirrors production's healthcheck (P1-E2-F1-T1) — curl/wget aren't
+    # installed in this image, so this uses Node's own http module.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:3000/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   web:
     image: ${GHCR_IMAGE_BASE}/web:${IMAGE_TAG:-latest}
@@ -81,3 +113,4 @@ services:
 volumes:
   septa_staging_postgres_data:
   septa_staging_uploads:
+  septa_staging_redis_data:

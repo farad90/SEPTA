@@ -1,6 +1,7 @@
 import { Controller, Get } from "@nestjs/common";
 import { HealthCheck, HealthCheckService, PrismaHealthIndicator } from "@nestjs/terminus";
 import { PrismaService } from "../prisma/prisma.service";
+import { RedisHealthIndicator } from "../common/redis/redis-health.indicator";
 
 // P1-E2-F1-T1 — no health-check endpoint existed anywhere; Docker's
 // `restart: unless-stopped` policy can only recover a fully-dead process, not
@@ -14,12 +15,16 @@ export class HealthController {
     private readonly health: HealthCheckService,
     private readonly prismaIndicator: PrismaHealthIndicator,
     private readonly prisma: PrismaService,
+    private readonly redisIndicator: RedisHealthIndicator,
   ) {}
 
   @Get()
   @HealthCheck()
   check() {
-    // Redis check to be added here once P1-E3-F1-T1 (Redis introduction) lands.
-    return this.health.check([() => this.prismaIndicator.pingCheck("database", this.prisma)]);
+    return this.health.check([
+      () => this.prismaIndicator.pingCheck("database", this.prisma),
+      // P1-E3-F1-T1 — Redis is now part of the stack, so it's part of "healthy".
+      () => this.redisIndicator.pingCheck("redis"),
+    ]);
   }
 }

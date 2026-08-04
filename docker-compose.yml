@@ -17,6 +17,22 @@ services:
       timeout: 5s
       retries: 10
 
+  # P1-E3-F1-T1 — Redis: cache/queue/pub-sub infrastructure for Phase 2 work;
+  # not used for anything yet beyond the health check.
+  redis:
+    image: redis:7-alpine
+    container_name: septa_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - septa_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   api:
     build:
       context: .
@@ -29,10 +45,13 @@ services:
       # داخل شبکه Docker، هاست پستگرس "postgres" است، نه localhost — این مقدار
       # env_file بالا رو override می‌کنه.
       DATABASE_URL: postgresql://septa:septa_dev_password@postgres:5432/septa?schema=public
+      REDIS_URL: redis://redis:6379
     ports:
       - "3000:3000"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     # P1-E2-F1-T1 — curl/wget aren't installed in the api image (only
     # ca-certificates/fonts-liberation/chromium are, for Puppeteer), so the
@@ -52,3 +71,4 @@ services:
 
 volumes:
   septa_postgres_data:
+  septa_redis_data:

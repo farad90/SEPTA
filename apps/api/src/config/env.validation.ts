@@ -27,6 +27,9 @@ export const envSchema = z.object({
   SMTP_PASS: z.preprocess(emptyAsUndefined, z.string().optional()),
   SMTP_FROM: z.preprocess(emptyAsUndefined, z.string().optional()),
   RFQ_RESPONSE_DUE_DAYS: z.coerce.number().int().positive().default(7),
+  // P1-E3-F1-T1 — Redis (cache/queue/pub-sub infrastructure introduced in
+  // this phase; not yet used for anything beyond the health check).
+  REDIS_URL: z.string().min(1).default("redis://localhost:6379"),
 });
 
 export type Env = z.infer<typeof envSchema>;
