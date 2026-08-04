@@ -1,0 +1,9 @@
+# Force LF regardless of the checking-out platform's autocrlf setting.
+# Without this, files written/edited on Windows (core.autocrlf=true here)
+# risk ending up with CRLF line endings — harmless for most files, but a
+# CRLF shebang line breaks a shell script with "bad interpreter" on the
+# actual Linux VPS/CI runner these files are meant to run on.
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Dockerfile text eol=lf
