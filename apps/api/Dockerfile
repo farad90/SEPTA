@@ -26,6 +26,10 @@ RUN pnpm --filter api exec prisma generate
 RUN pnpm --filter api run build
 
 FROM base AS runtime
+# P1-E1-F2-T2 — bake the commit SHA into the image so `docker inspect` can always
+# answer "what's actually running", instead of deploys being untraceable tar/scp copies.
+ARG GIT_COMMIT_SHA=unknown
+LABEL org.opencontainers.image.revision=$GIT_COMMIT_SHA
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app /app

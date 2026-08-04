@@ -16,6 +16,10 @@ ENV VITE_API_URL=${VITE_API_URL}
 RUN pnpm --filter web run build
 
 FROM nginx:1.27-alpine AS runtime
+# P1-E1-F2-T2 — bake the commit SHA into the image so `docker inspect` can always
+# answer "what's actually running", instead of deploys being untraceable tar/scp copies.
+ARG GIT_COMMIT_SHA=unknown
+LABEL org.opencontainers.image.revision=$GIT_COMMIT_SHA
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 EXPOSE 80
