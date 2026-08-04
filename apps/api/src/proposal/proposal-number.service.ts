@@ -1,12 +1,19 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "../../generated/prisma";
+import { AtomicCounterService } from "../common/atomic-counter/atomic-counter.service";
 
 /**
  * فاز ۵۱ — بازخورد کاربر: شماره پیشنهاد (و بارکد متناظرش) باید شامل سال + کد اختصاری
  * شرکت مشتری (نه شرکت گروه ما) + سریال باشه. جایگزین شمارنده‌ی سراسری سالانه (فاز ۵۰-الف).
+ *
+ * P1-E5-F1-T1 — atomic increment logic moved to AtomicCounterService; the
+ * buyer/short-code lookup above it (business logic, not counter logic) is
+ * unchanged.
  */
 @Injectable()
 export class ProposalNumberService {
+  constructor(private readonly counter: AtomicCounterService) {}
+
   async nextNumber(tx: Prisma.TransactionClient, inquiryId: string, now = new Date()): Promise<string> {
     const inquiry = await tx.inquiry.findUniqueOrThrow({
       where: { id: inquiryId },
@@ -19,25 +26,10 @@ export class ProposalNumberService {
     const shortCode = buyer.shortCodeEn || this.deriveFallbackCode(buyer.companyNameEn) || "CLIENT";
 
     const year = now.getFullYear();
-    const rows = await tx.$queryRaw<{ last_serial: number }[]>`
-      SELECT last_serial FROM proposal_client_counters
-      WHERE year = ${year} AND buyer_partner_id = ${inquiry.buyerId}::uuid FOR UPDATE
-    `;
-
-    let serial: number;
-    if (rows.length === 0) {
-      serial = 1;
-      await tx.$executeRaw`
-        INSERT INTO proposal_client_counters (year, buyer_partner_id, last_serial)
-        VALUES (${year}, ${inquiry.buyerId}::uuid, 1)
-      `;
-    } else {
-      serial = rows[0].last_serial + 1;
-      await tx.$executeRaw`
-        UPDATE proposal_client_counters SET last_serial = ${serial}
-        WHERE year = ${year} AND buyer_partner_id = ${inquiry.buyerId}::uuid
-      `;
-    }
+    const serial = await this.counter.next(tx, "proposal_client_counters", [
+      { column: "year", value: year },
+      { column: "buyer_partner_id", value: inquiry.buyerId, isUuid: true },
+    ]);
 
     return `${year}-${shortCode}-${String(serial).padStart(4, "0")}`;
   }

@@ -1,25 +1,18 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "../../generated/prisma";
+import { AtomicCounterService } from "../common/atomic-counter/atomic-counter.service";
 
-/** RFQ-<سال میلادی>-<سریال ۴ رقمی> — اتمیک، همون الگوی InquiryNumberService */
+/**
+ * RFQ-<سال میلادی>-<سریال ۴ رقمی> — اتمیک، همون الگوی InquiryNumberService.
+ * P1-E5-F1-T1 — atomic increment logic moved to AtomicCounterService.
+ */
 @Injectable()
 export class RfqNumberService {
+  constructor(private readonly counter: AtomicCounterService) {}
+
   async nextNumber(tx: Prisma.TransactionClient, now = new Date()): Promise<string> {
     const year = now.getFullYear();
-
-    const rows = await tx.$queryRaw<{ last_serial: number }[]>`
-      SELECT last_serial FROM rfq_counters WHERE year = ${year} FOR UPDATE
-    `;
-
-    let serial: number;
-    if (rows.length === 0) {
-      serial = 1;
-      await tx.$executeRaw`INSERT INTO rfq_counters (year, last_serial) VALUES (${year}, 1)`;
-    } else {
-      serial = rows[0].last_serial + 1;
-      await tx.$executeRaw`UPDATE rfq_counters SET last_serial = ${serial} WHERE year = ${year}`;
-    }
-
+    const serial = await this.counter.next(tx, "rfq_counters", [{ column: "year", value: year }]);
     return `RFQ-${year}-${String(serial).padStart(4, "0")}`;
   }
 }

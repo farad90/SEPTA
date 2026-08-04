@@ -1,4 +1,5 @@
 import { LetterNumberService } from "./letter-number.service";
+import { AtomicCounterService } from "../common/atomic-counter/atomic-counter.service";
 
 function buildTx(existingSerial: number | null) {
   return {
@@ -9,7 +10,7 @@ function buildTx(existingSerial: number | null) {
 
 describe("LetterNumberService — شماره‌گذاری بر مبنای شرکت گروه صادرکننده", () => {
   it("uses the Jalali year for a calendar_type='jalali' entity", async () => {
-    const service = new LetterNumberService();
+    const service = new LetterNumberService(new AtomicCounterService());
     const tx = buildTx(null);
     const now = new Date("2026-07-10T10:00:00Z");
 
@@ -20,7 +21,7 @@ describe("LetterNumberService — شماره‌گذاری بر مبنای شرک
   });
 
   it("uses the Gregorian year for a calendar_type='gregorian' entity", async () => {
-    const service = new LetterNumberService();
+    const service = new LetterNumberService(new AtomicCounterService());
     const tx = buildTx(null);
     const now = new Date("2026-07-10T10:00:00Z");
 
@@ -30,7 +31,7 @@ describe("LetterNumberService — شماره‌گذاری بر مبنای شرک
   });
 
   it("increments the existing serial instead of restarting at 1", async () => {
-    const service = new LetterNumberService();
+    const service = new LetterNumberService(new AtomicCounterService());
     const tx = buildTx(41);
     const now = new Date("2026-07-10T10:00:00Z");
 

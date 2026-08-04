@@ -37,6 +37,7 @@ import { BroadcastMessagesModule } from "./broadcast-messages/broadcast-messages
 import { HealthModule } from "./health/health.module";
 import { LoggingModule } from "./common/logging/logging.module";
 import { RedisModule } from "./common/redis/redis.module";
+import { AtomicCounterModule } from "./common/atomic-counter/atomic-counter.module";
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { RedisModule } from "./common/redis/redis.module";
     ScheduleModule.forRoot(),
     PrismaModule,
     RedisModule,
+    AtomicCounterModule,
     HealthModule,
     PermissionsModule,
     AuthModule,
