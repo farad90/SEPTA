@@ -1,5 +1,6 @@
 import { Global, Logger, Module } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
+import { TerminusModule } from "@nestjs/terminus";
 import Redis from "ioredis";
 import { REDIS_CLIENT } from "./redis.constants";
 import { RedisHealthIndicator } from "./redis-health.indicator";
@@ -11,9 +12,18 @@ const logger = new Logger("RedisModule");
 // health-checked. Deliberately not used for anything yet — caching, the
 // BullMQ job queue, and WebSocket pub/sub are Phase 2 work that will consume
 // this same client/module rather than each reinventing their own connection.
+//
+// P0-E3-F3-T5 — TerminusModule is required here (not just in HealthModule):
+// RedisHealthIndicator depends on terminus's HealthIndicatorService, and
+// @Global() only affects EXPORT visibility to other modules, not a module's
+// own ability to resolve its own providers' dependencies. Without this
+// import the app fails to boot at all with an unresolved-dependency error —
+// confirmed live: this was broken until this fix, undetected until now
+// because nothing had actually booted the compiled app since Redis/health
+// were wired together.
 @Global()
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, TerminusModule],
   providers: [
     {
       provide: REDIS_CLIENT,
