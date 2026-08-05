@@ -1,11 +1,13 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import * as argon2 from "argon2";
 import { PrismaService } from "../prisma/prisma.service";
+import { PermissionsService } from "../permissions/permissions.service";
 import { CreateUserDto } from "./dto/create-user.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
 import { ResetUserPasswordDto } from "./dto/reset-user-password.dto";
@@ -46,7 +48,10 @@ const USER_SELECT = {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly permissions: PermissionsService,
+  ) {}
 
   async listAll() {
     return this.prisma.user.findMany({
@@ -166,11 +171,28 @@ export class UsersService {
   /**
    * ریست پسورد یک کاربر توسط مدیر (users.manage) — پاسخ به سناریوی «کاربر رمزش رو فراموش کرده
    * و به ایمیلش دسترسی نداره». بعد از تغییر، همه نشست‌های فعال اون کاربر باطل می‌شن.
+   *
+   * P0-E3-F3-T6 — قبلاً هیچ بررسی سلسله‌مراتبی نبود: هر دارنده‌ی users.manage می‌تونست رمز
+   * هر کاربر دیگه‌ای رو ریست کنه، حتی یک مدیر دیگه — یک مسیر تشدید دسترسی واقعی (یک حساب
+   * مدیریتی کم‌اهمیت‌تر می‌تونست کنترل کامل یک حساب مدیریتی بالاتر رو به دست بگیره). این
+   * پرمیژن‌ها رتبه‌بندی‌شده نیستن، پس قانون دقیق و بدون نیاز به رتبه‌بندی: کسی که خودش
+   * users.manage داره، نمی‌تونه از این مسیر رمز کاربر دیگه‌ای که او هم users.manage داره رو
+   * عوض کنه — باید از مسیر «فراموشی رمز عبور» خودسرویس استفاده کنه. ریست رمز خودش (که عملاً
+   * بی‌معنیه ولی نظری ممکنه) و ریست رمز کاربران غیرمدیریتی (سناریوی اصلی و رایج) دست‌نخورده می‌مونه.
    */
-  async resetPassword(userId: string, dto: ResetUserPasswordDto) {
+  async resetPassword(userId: string, dto: ResetUserPasswordDto, currentUserId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException("کاربر یافت نشد");
+    }
+
+    if (userId !== currentUserId) {
+      const targetIsAlsoAdmin = await this.permissions.hasPermission(userId, "users.manage");
+      if (targetIsAlsoAdmin) {
+        throw new ForbiddenException(
+          "برای ریست رمز یک حساب مدیریتی دیگه، از مسیر «فراموشی رمز عبور» استفاده کنید",
+        );
+      }
     }
 
     const passwordHash = await argon2.hash(dto.newPassword);

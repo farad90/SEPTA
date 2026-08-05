@@ -100,8 +100,13 @@ export class UsersController {
     return this.usersService.update(id, dto, user.userId);
   }
 
+  // P0-E3-F3-T6 — currentUserId enables the hierarchy check in the service.
   @Post(":id/reset-password")
-  resetPassword(@Param("id", ParseUUIDPipe) id: string, @Body() dto: ResetUserPasswordDto) {
-    return this.usersService.resetPassword(id, dto);
+  resetPassword(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: ResetUserPasswordDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.usersService.resetPassword(id, dto, user.userId);
   }
 }
