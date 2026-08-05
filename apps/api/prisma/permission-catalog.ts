@@ -22,6 +22,9 @@ export const PERMISSION_MODULES: PermissionModuleDef[] = [
     label: "ثبت استعلام",
     items: [
       { key: "inquiry.view", label: "مشاهده استعلام‌ها" },
+      // P0-E3-F2-T3 — بدون این، هر دارنده‌ی inquiry.view همه‌ی پرونده‌ها رو می‌دید، نه فقط
+      // پرونده‌های خودش؛ پیش‌فرض فقط گروه «مدیریت» (از طریق ALL_PERMISSION_KEYS پایین‌تر).
+      { key: "inquiry.view_all", label: "مشاهده تمام پرونده‌های استعلام (نه فقط پرونده‌های خودم)" },
       { key: "inquiry.create", label: "ثبت استعلام جدید" },
       { key: "inquiry.edit", label: "ویرایش استعلام" },
       { key: "inquiry.delete", label: "حذف استعلام (انتقال به سطل حذف‌شده‌ها)" },

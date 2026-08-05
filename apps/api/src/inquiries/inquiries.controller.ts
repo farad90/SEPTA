@@ -37,15 +37,19 @@ export class InquiriesController {
 
   @RequirePermissions("inquiry.view")
   @Get("inquiries")
-  list(@Query() query: ListInquiriesQueryDto) {
-    return this.service.list(query);
+  list(@Query() query: ListInquiriesQueryDto, @CurrentUser() user: RequestUser) {
+    return this.service.list(query, user.userId);
   }
 
   // باید قبل از "inquiries/:id" تعریف بشه وگرنه ParseUUIDPipe رشته "export" رو رد می‌کنه
   @RequirePermissions("inquiry.view")
   @Get("inquiries/export")
-  async export(@Query() query: ListInquiriesQueryDto, @Res() res: Response) {
-    const buffer = await this.service.export(query);
+  async export(
+    @Query() query: ListInquiriesQueryDto,
+    @Res() res: Response,
+    @CurrentUser() user: RequestUser,
+  ) {
+    const buffer = await this.service.export(query, user.userId);
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -60,10 +64,12 @@ export class InquiriesController {
     return this.service.create(dto, user.userId);
   }
 
+  // P0-E3-F2-T3 — currentUserId enables ownership scoping; a request for an
+  // inquiry outside the caller's scope now 404s instead of returning it.
   @RequirePermissions("inquiry.view")
   @Get("inquiries/:id")
-  getById(@Param("id", ParseUUIDPipe) id: string) {
-    return this.service.getById(id);
+  getById(@Param("id", ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
+    return this.service.getById(id, { currentUserId: user.userId });
   }
 
   @RequirePermissions("inquiry.edit")

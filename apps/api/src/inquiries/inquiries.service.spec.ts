@@ -312,7 +312,7 @@ describe("InquiriesService — سطل حذف (soft delete)", () => {
     prisma.$transaction.mockImplementation(async (ops: unknown[]) => Promise.all(ops as Promise<unknown>[]));
     const { service } = buildService(prisma);
 
-    await service.list({});
+    await service.list({}, USER_ID);
 
     expect(prisma.inquiry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ deletedAt: null }) }),
@@ -331,7 +331,7 @@ describe("InquiriesService — سطل حذف (soft delete)", () => {
     prisma.$transaction.mockImplementation(async (ops: unknown[]) => Promise.all(ops as Promise<unknown>[]));
     const { service } = buildService(prisma);
 
-    const { items } = await service.list({});
+    const { items } = await service.list({}, USER_ID);
 
     expect(items.map((i) => i.stageLabel)).toEqual([
       "ثبت استعلام",
@@ -339,6 +339,133 @@ describe("InquiriesService — سطل حذف (soft delete)", () => {
       "پیشنهاد به مشتری",
       null,
     ]);
+  });
+});
+
+describe("InquiriesService — P0-E3-F2-T3: محدودسازی دسترسی بر مبنای مالکیت", () => {
+  const OTHER_USER_ID = "44444444-4444-4444-4444-444444444444";
+
+  it("list() بدون inquiry.view_all فقط پرونده‌های خودم رو با AND ترکیب می‌کنه (نه OR جستجو رو بازنویسی)", async () => {
+    const prisma = buildPrisma();
+    prisma.inquiry.findMany.mockResolvedValue([]);
+    prisma.inquiry.count.mockResolvedValue(0);
+    prisma.$transaction.mockImplementation(async (ops: unknown[]) => Promise.all(ops as Promise<unknown>[]));
+    const { service, permissions } = buildService(prisma);
+    permissions.hasPermission.mockResolvedValue(false);
+
+    await service.list({ q: "بلبرینگ" }, USER_ID);
+
+    const calledWhere = prisma.inquiry.findMany.mock.calls[0][0].where;
+    // جستجوی متنی (OR روی چند فیلد) باید دست‌نخورده بمونه، فقط به‌همراه شرط مالکیت با AND
+    expect(calledWhere.AND).toHaveLength(2);
+    expect(calledWhere.AND[0].OR).toEqual(expect.arrayContaining([{ internalNumber: expect.anything() }]));
+    expect(calledWhere.AND[1]).toEqual({
+      OR: [{ salesExpertId: USER_ID }, { createdByUserId: USER_ID }],
+    });
+    expect(permissions.hasPermission).toHaveBeenCalledWith(USER_ID, "inquiry.view_all");
+  });
+
+  it("list() بدون جستجوی متنی، شرط مالکیت رو مستقیم روی OR می‌ذاره", async () => {
+    const prisma = buildPrisma();
+    prisma.inquiry.findMany.mockResolvedValue([]);
+    prisma.inquiry.count.mockResolvedValue(0);
+    prisma.$transaction.mockImplementation(async (ops: unknown[]) => Promise.all(ops as Promise<unknown>[]));
+    const { service, permissions } = buildService(prisma);
+    permissions.hasPermission.mockResolvedValue(false);
+
+    await service.list({}, USER_ID);
+
+    const calledWhere = prisma.inquiry.findMany.mock.calls[0][0].where;
+    expect(calledWhere.OR).toEqual([{ salesExpertId: USER_ID }, { createdByUserId: USER_ID }]);
+    expect(calledWhere.AND).toBeUndefined();
+  });
+
+  it("list() با inquiry.view_all هیچ محدودیت مالکیتی اضافه نمی‌کنه", async () => {
+    const prisma = buildPrisma();
+    prisma.inquiry.findMany.mockResolvedValue([]);
+    prisma.inquiry.count.mockResolvedValue(0);
+    prisma.$transaction.mockImplementation(async (ops: unknown[]) => Promise.all(ops as Promise<unknown>[]));
+    const { service, permissions } = buildService(prisma);
+    permissions.hasPermission.mockResolvedValue(true);
+
+    await service.list({}, USER_ID);
+
+    const calledWhere = prisma.inquiry.findMany.mock.calls[0][0].where;
+    expect(calledWhere.OR).toBeUndefined();
+    expect(calledWhere.AND).toBeUndefined();
+  });
+
+  it("getById با currentUserId خارج از scope، NotFoundException می‌ده — نه برای غریبه‌ها متفاوت از رکورد ناموجود", async () => {
+    const prisma = buildPrisma();
+    prisma.inquiry.findUnique.mockResolvedValue({
+      id: "inq-1",
+      deletedAt: null,
+      salesExpertId: OTHER_USER_ID,
+      createdByUserId: OTHER_USER_ID,
+    });
+    const { service, permissions } = buildService(prisma);
+    permissions.hasPermission.mockResolvedValue(false);
+
+    await expect(service.getById("inq-1", { currentUserId: USER_ID })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it("getById با currentUserId که salesExpert همون پرونده‌ست، دسترسی می‌ده", async () => {
+    const prisma = buildPrisma();
+    prisma.inquiry.findUnique.mockResolvedValue({
+      id: "inq-1",
+      deletedAt: null,
+      salesExpertId: USER_ID,
+      createdByUserId: OTHER_USER_ID,
+    });
+    const { service, permissions } = buildService(prisma);
+    permissions.hasPermission.mockResolvedValue(false);
+
+    await expect(service.getById("inq-1", { currentUserId: USER_ID })).resolves.toBeDefined();
+  });
+
+  it("getById با currentUserId که فقط createdBy همون پرونده‌ست (نه salesExpert)، دسترسی می‌ده", async () => {
+    const prisma = buildPrisma();
+    prisma.inquiry.findUnique.mockResolvedValue({
+      id: "inq-1",
+      deletedAt: null,
+      salesExpertId: OTHER_USER_ID,
+      createdByUserId: USER_ID,
+    });
+    const { service, permissions } = buildService(prisma);
+    permissions.hasPermission.mockResolvedValue(false);
+
+    await expect(service.getById("inq-1", { currentUserId: USER_ID })).resolves.toBeDefined();
+  });
+
+  it("getById با inquiry.view_all به یک پرونده‌ی غیرخودی هم دسترسی می‌ده", async () => {
+    const prisma = buildPrisma();
+    prisma.inquiry.findUnique.mockResolvedValue({
+      id: "inq-1",
+      deletedAt: null,
+      salesExpertId: OTHER_USER_ID,
+      createdByUserId: OTHER_USER_ID,
+    });
+    const { service, permissions } = buildService(prisma);
+    permissions.hasPermission.mockResolvedValue(true);
+
+    await expect(service.getById("inq-1", { currentUserId: USER_ID })).resolves.toBeDefined();
+  });
+
+  it("getById بدون currentUserId (فراخوانی‌های داخلی مثل update/assign) هیچ محدودیتی اعمال نمی‌کنه", async () => {
+    const prisma = buildPrisma();
+    prisma.inquiry.findUnique.mockResolvedValue({
+      id: "inq-1",
+      deletedAt: null,
+      salesExpertId: OTHER_USER_ID,
+      createdByUserId: OTHER_USER_ID,
+    });
+    const { service, permissions } = buildService(prisma);
+    permissions.hasPermission.mockResolvedValue(false);
+
+    await expect(service.getById("inq-1")).resolves.toBeDefined();
+    expect(permissions.hasPermission).not.toHaveBeenCalled();
   });
 });
 

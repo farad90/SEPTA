@@ -188,10 +188,37 @@ export class InquiriesService {
     return where;
   }
 
-  async list(query: ListInquiriesQueryDto) {
+  /**
+   * P0-E3-F2-T3 — without this, any holder of inquiry.view saw every
+   * inquiry in the system, not just their own; the audit's example was a
+   * sales rep reading another rep's customer negotiations. Composed via AND
+   * rather than overwriting `where.OR` directly, since buildListWhere's own
+   * free-text search already uses `where.OR` for its match conditions —
+   * both need to hold simultaneously ("matches the search AND is in scope"),
+   * not just the last one assigned.
+   */
+  private applyOwnershipScope(
+    where: Prisma.InquiryWhereInput,
+    currentUserId: string,
+  ): Prisma.InquiryWhereInput {
+    const scopeCondition: Prisma.InquiryWhereInput = {
+      OR: [{ salesExpertId: currentUserId }, { createdByUserId: currentUserId }],
+    };
+    if (!where.OR) {
+      return { ...where, ...scopeCondition };
+    }
+    const { OR, ...rest } = where;
+    return { ...rest, AND: [{ OR }, scopeCondition] };
+  }
+
+  async list(query: ListInquiriesQueryDto, currentUserId: string) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
-    const where = this.buildListWhere(query);
+    let where = this.buildListWhere(query);
+    const canViewAll = await this.permissions.hasPermission(currentUserId, "inquiry.view_all");
+    if (!canViewAll) {
+      where = this.applyOwnershipScope(where, currentUserId);
+    }
 
     const orderBy: Prisma.InquiryOrderByWithRelationInput =
       query.sortBy === "deadline"
@@ -225,8 +252,15 @@ export class InquiriesService {
   /** خروجی اکسل کل لیست — همون فیلترهای q/status/buyer/salesExpert صفحه لیست، بدون صفحه‌بندی */
   async export(
     query: Pick<ListInquiriesQueryDto, "q" | "status" | "buyerId" | "salesExpertId">,
+    currentUserId: string,
   ): Promise<Buffer> {
-    const where = this.buildListWhere(query);
+    let where = this.buildListWhere(query);
+    // P0-E3-F2-T3 — same scoping as list(); without it, Excel export was a
+    // second, unscoped copy of the exact same leak in a different format.
+    const canViewAll = await this.permissions.hasPermission(currentUserId, "inquiry.view_all");
+    if (!canViewAll) {
+      where = this.applyOwnershipScope(where, currentUserId);
+    }
     const rows = await this.prisma.inquiry.findMany({
       where,
       include: LIST_INCLUDE,
@@ -372,13 +406,36 @@ export class InquiriesService {
     return pending.length;
   }
 
-  async getById(id: string, { includeDeleted = false } = {}) {
+  /**
+   * P0-E3-F2-T3 — `currentUserId` is optional and deliberately opt-in: every
+   * internal self-call within this class (update/assign/decline/remove/
+   * restore/purge/addItem/...) omits it, so their behavior is completely
+   * unchanged — those write paths are already gated by their own specific
+   * permission (inquiry.edit/inquiry.assign/etc.) at the controller, and
+   * scoping them too is a larger, separate change. Only the controller's
+   * read (GET) endpoint passes it, matching the audit finding this fixes:
+   * "a sales user requesting another rep's inquiry by ID gets 403" — well,
+   * 404 here, deliberately, so an out-of-scope ID doesn't even confirm a
+   * record exists (same not-found-not-forbidden philosophy this codebase
+   * already uses for password reset's generic response).
+   */
+  async getById(
+    id: string,
+    { includeDeleted = false, currentUserId }: { includeDeleted?: boolean; currentUserId?: string } = {},
+  ) {
     const inquiry = await this.prisma.inquiry.findUnique({
       where: { id },
       include: DETAIL_INCLUDE,
     });
     if (!inquiry || (inquiry.deletedAt && !includeDeleted)) {
       throw new NotFoundException("پرونده استعلام یافت نشد");
+    }
+    if (currentUserId) {
+      const canViewAll = await this.permissions.hasPermission(currentUserId, "inquiry.view_all");
+      const isOwn = inquiry.salesExpertId === currentUserId || inquiry.createdByUserId === currentUserId;
+      if (!canViewAll && !isOwn) {
+        throw new NotFoundException("پرونده استعلام یافت نشد");
+      }
     }
     return inquiry;
   }
