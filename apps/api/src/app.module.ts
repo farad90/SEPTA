@@ -1,5 +1,7 @@
 import { Module } from "@nestjs/common";
+import { APP_GUARD } from "@nestjs/core";
 import { ConfigModule } from "@nestjs/config";
+import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { validateEnv } from "./config/env.validation";
 import { PrismaModule } from "./prisma/prisma.module";
 import { AuthModule } from "./auth/auth.module";
@@ -46,6 +48,16 @@ import { AtomicCounterModule } from "./common/atomic-counter/atomic-counter.modu
       isGlobal: true,
       validate: validateEnv,
     }),
+    // P0-E3-F3-T5 — global default: 100 req/min per IP. Auth routes get a
+    // much stricter override (see auth.controller.ts's @Throttle calls) —
+    // there was previously no rate limiting anywhere, so login/forgot-
+    // password/reset-password/register could be brute-forced without limit.
+    // In-memory storage is correct for the current single-instance
+    // deployment; move to a Redis-backed ThrottlerStorage (Redis already
+    // exists in the stack, see RedisModule) once there's more than one API
+    // instance (Phase 2 of the V2 roadmap) — in-memory limits don't share
+    // state across instances.
+    ThrottlerModule.forRoot([{ name: "default", ttl: 60_000, limit: 100 }]),
     ScheduleModule.forRoot(),
     PrismaModule,
     RedisModule,
@@ -83,5 +95,6 @@ import { AtomicCounterModule } from "./common/atomic-counter/atomic-counter.modu
     SiteSettingsModule,
     BroadcastMessagesModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

@@ -10,6 +10,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
 import { ConfigService } from "@nestjs/config";
 import { AuthService } from "./auth.service";
@@ -29,6 +30,10 @@ export class AuthController {
     private readonly config: ConfigService,
   ) {}
 
+  // P0-E3-F3-T5 — was completely unthrottled; an attacker could script
+  // account-creation spam without limit. 5/min/IP, well above any real user's
+  // needs (nobody registers 5 times a minute) but low enough to blunt scripted abuse.
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post("register")
   async register(@Body() dto: RegisterDto) {
     const user = await this.authService.register(dto);
@@ -39,6 +44,9 @@ export class AuthController {
     };
   }
 
+  // P0-E3-F3-T5 — was completely unthrottled; an attacker could brute-force
+  // any known account's password without limit. 5/min/IP.
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post("login")
   @HttpCode(HttpStatus.OK)
   async login(
@@ -68,6 +76,9 @@ export class AuthController {
   }
 
   // پیام همیشه یکسانه (چه کاربر پیدا بشه چه نه) — جلوگیری از User Enumeration
+  // P0-E3-F3-T5 — was completely unthrottled; an attacker could spam the
+  // mail queue or probe for valid accounts via response timing. 5/min/IP.
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post("forgot-password")
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
@@ -77,6 +88,10 @@ export class AuthController {
     };
   }
 
+  // P0-E3-F3-T5 — was completely unthrottled; an attacker could brute-force
+  // the reset token (a random 32-byte value, so this is defense-in-depth,
+  // not the primary defense). 5/min/IP.
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post("reset-password")
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() dto: ResetPasswordDto) {
