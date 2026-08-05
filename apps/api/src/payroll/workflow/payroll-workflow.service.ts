@@ -2,7 +2,12 @@ import { ForbiddenException, Injectable } from "@nestjs/common";
 import { PermissionsService } from "../../permissions/permissions.service";
 import { PayrollAuditLogService } from "../audit/payroll-audit-log.service";
 import { PayrollResultRepository } from "../repositories/payroll-result.repository";
-import { InvalidPayrollTransitionError, PayrollResultLockedError, PayrollResultNotFoundError } from "./errors";
+import {
+  InvalidPayrollTransitionError,
+  PayrollConcurrentModificationError,
+  PayrollResultLockedError,
+  PayrollResultNotFoundError,
+} from "./errors";
 import { MANUAL_TRANSITIONS, ManualPayrollTransition, isLocked } from "./payroll-status";
 
 /**
@@ -35,13 +40,22 @@ export class PayrollWorkflowService {
       throw new ForbiddenException("دسترسی کافی برای این عملیات ندارید");
     }
 
+    // P0-E4-F1-T1 — result.status (read above, already validated against
+    // rule.requiresFrom) is passed through as the expected-current-status
+    // guard; if it no longer matches by the time this runs, a concurrent
+    // transition won the race and this one is rejected instead of silently
+    // clobbering it.
     const updated = await this.resultRepository.updateStatus(
       resultId,
       targetStatus,
       actorId,
       rule.stampField,
       rule.actorField,
+      result.status,
     );
+    if (!updated) {
+      throw new PayrollConcurrentModificationError(resultId);
+    }
 
     await this.auditLog.log({
       entityType: "payroll_result",

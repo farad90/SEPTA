@@ -122,16 +122,35 @@ export class PayrollResultRepository {
     return result;
   }
 
-  updateStatus(
+  /**
+   * P0-E4-F1-T1 — the plain `update({ where: { id } })` this used to be had
+   * no guard against a concurrent second transition: two calls reading the
+   * same starting status could both pass PayrollWorkflowService's
+   * check-then-act validation and both write, the second silently
+   * clobbering the first's actor/timestamp. `expectedCurrentStatus` (the
+   * status the caller just validated the transition against) turns the
+   * write itself into the concurrency check, via a single atomic
+   * conditional UPDATE — if the row's status has already changed by the
+   * time this runs, the WHERE clause matches zero rows and the caller finds
+   * out instead of silently overwriting a state it never actually saw.
+   * Returns null on that race-lost case; the caller is responsible for
+   * turning that into PayrollConcurrentModificationError.
+   */
+  async updateStatus(
     id: string,
     status: string,
     actorId: string,
     stampField: "reviewedAt" | "approvedAt" | "postedAt" | "lockedAt",
     actorField: "reviewedBy" | "approvedBy" | "postedBy" | "lockedBy",
+    expectedCurrentStatus: string,
   ) {
-    return this.prisma.payrollResult.update({
-      where: { id },
+    const { count } = await this.prisma.payrollResult.updateMany({
+      where: { id, status: expectedCurrentStatus },
       data: { status, [stampField]: new Date(), [actorField]: actorId },
     });
+    if (count === 0) {
+      return null;
+    }
+    return this.prisma.payrollResult.findUnique({ where: { id } });
   }
 }

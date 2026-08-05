@@ -5,6 +5,7 @@ import { EmployeeContractNotFoundError, PayrollPeriodNotFoundError as PipelinePe
 import { PayrollPeriodNotFoundError as WorkLogPeriodNotFoundError } from "./worklog/errors";
 import {
   InvalidPayrollTransitionError,
+  PayrollConcurrentModificationError,
   PayrollResultLockedError,
   PayrollResultNotFoundError,
 } from "./workflow/errors";
@@ -29,7 +30,11 @@ export function mapPayrollDomainError(err: unknown): never {
     throw new BadRequestException(err.message);
   }
 
-  if (err instanceof PayrollResultLockedError || err instanceof InvalidPayrollTransitionError) {
+  if (
+    err instanceof PayrollResultLockedError ||
+    err instanceof InvalidPayrollTransitionError ||
+    err instanceof PayrollConcurrentModificationError
+  ) {
     throw new ConflictException(err.message);
   }
 

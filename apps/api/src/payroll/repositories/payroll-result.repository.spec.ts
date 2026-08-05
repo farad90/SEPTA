@@ -3,7 +3,7 @@ import { PayrollResultRepository } from "./payroll-result.repository";
 
 function buildPrisma() {
   const prisma: any = {
-    payrollResult: { findUnique: jest.fn(), update: jest.fn(), create: jest.fn() },
+    payrollResult: { findUnique: jest.fn(), update: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
     payrollResultItem: { deleteMany: jest.fn(), createMany: jest.fn() },
   };
   return prisma;
@@ -103,6 +103,36 @@ describe("PayrollResultRepository.saveResult", () => {
     await repo.saveResult("period-1", "emp-1", TOTALS, ITEMS, tx);
 
     expect(tx.payrollResult.findUnique).toHaveBeenCalled();
+    expect(prisma.payrollResult.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+// P0-E4-F1-T1
+describe("PayrollResultRepository.updateStatus", () => {
+  it("وقتی status ردیف با expectedCurrentStatus مطابقت داره، آپدیت اتمی انجام و ردیف تازه برگردونده می‌شه", async () => {
+    const prisma = buildPrisma();
+    prisma.payrollResult.updateMany.mockResolvedValue({ count: 1 });
+    prisma.payrollResult.findUnique.mockResolvedValue({ id: "r1", status: "reviewed" });
+    const repo = buildRepo(prisma);
+
+    const result = await repo.updateStatus("r1", "reviewed", "u1", "reviewedAt", "reviewedBy", "calculated");
+
+    expect(prisma.payrollResult.updateMany).toHaveBeenCalledWith({
+      where: { id: "r1", status: "calculated" },
+      data: { status: "reviewed", reviewedAt: expect.any(Date), reviewedBy: "u1" },
+    });
+    expect(result).toEqual({ id: "r1", status: "reviewed" });
+  });
+
+  it("وقتی یک عملیات هم‌زمان دیگه اول status رو عوض کرده (WHERE هیچ ردیفی رو نمی‌گیره)، null برمی‌گردونه — نه خطا، نه آپدیت خاموش", async () => {
+    const prisma = buildPrisma();
+    prisma.payrollResult.updateMany.mockResolvedValue({ count: 0 });
+    const repo = buildRepo(prisma);
+
+    const result = await repo.updateStatus("r1", "reviewed", "u1", "reviewedAt", "reviewedBy", "calculated");
+
+    expect(result).toBeNull();
+    // شکست تشخیص داده شد و اونجا متوقف شد — هیچ تلاشی برای خوندن/برگردوندن ردیف نشد
     expect(prisma.payrollResult.findUnique).not.toHaveBeenCalled();
   });
 });
