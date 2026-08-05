@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "../../generated/prisma";
 import { PrismaService } from "../prisma/prisma.service";
+import { PermissionsService } from "../permissions/permissions.service";
+import { HrAccessService } from "./hr-access.service";
 import {
   AssignEmployeeNumberDto,
   CreateEmployeeDto,
@@ -28,13 +30,53 @@ const EMPLOYEE_INCLUDE = {
 
 @Injectable()
 export class EmployeesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly permissions: PermissionsService,
+    private readonly hrAccess: HrAccessService,
+  ) {}
 
-  async list(query: ListEmployeesQueryDto) {
-    const where: Prisma.EmployeeWhereInput = {};
-    if (query.departmentId) {
-      where.departmentId = query.departmentId;
+  /**
+   * P0-E3-F2-T4 — caller's own department plus every descendant department
+   * (BFS over the whole tree; the table is small, one query, no N+1). A
+   * caller with no linked Employee record, or whose Employee has no
+   * department, gets an empty scope (visible to nobody) rather than an
+   * error — this matters because hr.view_all-less callers can otherwise
+   * still legitimately hold hr.view (e.g. a future narrow HR-liaison role),
+   * and a hard failure would break the whole page for an edge case instead
+   * of just correctly showing nothing.
+   */
+  private async getScopedDepartmentIds(currentUserId: string): Promise<string[]> {
+    const employee = await this.hrAccess.getMyEmployee(currentUserId);
+    if (!employee?.departmentId) {
+      return [];
     }
+    const allDepartments = await this.prisma.department.findMany({
+      select: { id: true, parentDepartmentId: true },
+    });
+    const childrenByParent = new Map<string, string[]>();
+    for (const dept of allDepartments) {
+      if (!dept.parentDepartmentId) continue;
+      const siblings = childrenByParent.get(dept.parentDepartmentId) ?? [];
+      siblings.push(dept.id);
+      childrenByParent.set(dept.parentDepartmentId, siblings);
+    }
+    const scoped = new Set<string>([employee.departmentId]);
+    const queue = [employee.departmentId];
+    while (queue.length > 0) {
+      const current = queue.shift() as string;
+      for (const childId of childrenByParent.get(current) ?? []) {
+        if (!scoped.has(childId)) {
+          scoped.add(childId);
+          queue.push(childId);
+        }
+      }
+    }
+    return [...scoped];
+  }
+
+  async list(query: ListEmployeesQueryDto, currentUserId: string) {
+    const where: Prisma.EmployeeWhereInput = {};
     if (query.status) {
       where.employmentStatus = query.status;
     }
@@ -43,6 +85,19 @@ export class EmployeesService {
         { fullName: { contains: query.q, mode: "insensitive" } },
         { employeeNumber: { contains: query.q, mode: "insensitive" } },
       ];
+    }
+
+    const canViewAll = await this.permissions.hasPermission(currentUserId, "hr.view_all");
+    if (canViewAll) {
+      if (query.departmentId) where.departmentId = query.departmentId;
+    } else {
+      const scopedDepartmentIds = await this.getScopedDepartmentIds(currentUserId);
+      // اگه کاربر صراحتاً یک بخش خاص رو فیلتر کرده، فقط وقتی معتبره که داخل scope خودش باشه —
+      // وگرنه نتیجه خالیه (نه نادیده گرفتن فیلتر، نه دورزدن محدودیت)
+      where.departmentId =
+        query.departmentId && !scopedDepartmentIds.includes(query.departmentId)
+          ? { in: [] }
+          : (query.departmentId ?? { in: scopedDepartmentIds });
     }
 
     return this.prisma.employee.findMany({
@@ -69,13 +124,30 @@ export class EmployeesService {
     `;
   }
 
-  async getById(id: string) {
+  /**
+   * P0-E3-F2-T4 — currentUserId is optional and opt-in, same pattern as
+   * InquiriesService.getById (P0-E3-F2-T3): every internal self-call within
+   * this class (update/assignNumber/addContract/...) omits it, so their
+   * behavior is completely unchanged. Only the controller's read (GET)
+   * endpoint passes it. Out-of-scope returns 404, not 403, for the same
+   * reason as inquiries — doesn't confirm the record exists.
+   */
+  async getById(id: string, currentUserId?: string) {
     const employee = await this.prisma.employee.findUnique({
       where: { id },
       include: EMPLOYEE_INCLUDE,
     });
     if (!employee) {
       throw new NotFoundException("پرسنل یافت نشد");
+    }
+    if (currentUserId) {
+      const canViewAll = await this.permissions.hasPermission(currentUserId, "hr.view_all");
+      if (!canViewAll) {
+        const scopedDepartmentIds = await this.getScopedDepartmentIds(currentUserId);
+        if (!employee.departmentId || !scopedDepartmentIds.includes(employee.departmentId)) {
+          throw new NotFoundException("پرسنل یافت نشد");
+        }
+      }
     }
     return employee;
   }
