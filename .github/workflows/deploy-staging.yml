@@ -11,16 +11,18 @@ name: Deploy to Staging
 #                        note on privilege separation; this workflow assumes that
 #                        hardening has already happened)
 #   STAGING_SSH_KEY   — the private key for that user
-# None of these exist yet in this environment — provisioning the actual staging
-# VPS and wiring these secrets is infrastructure work outside what can be done
-# from a code change alone. This workflow is code-complete and ready to run the
-# moment that infrastructure exists.
+# None of these exist yet — there is no staging host provisioned as of
+# 2026-08-09 (production, 91.223.61.70, is deployed by deploy-production.yml
+# instead, directly from source — see that file's header for why). Trigger is
+# manual-only (workflow_dispatch) for exactly this reason: with the automatic
+# workflow_run trigger this used to have, it fired on every push to main and
+# failed with "missing server host" every single time (confusing noise, no
+# real harm since the empty-secret failure never touches any server) — this
+# is code-complete and ready to switch back to workflow_run once a real
+# staging host + these three secrets actually exist.
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:
