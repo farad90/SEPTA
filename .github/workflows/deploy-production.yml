@@ -1,0 +1,97 @@
+name: Deploy to Production
+
+# Automates exactly the manual deploy process used on 2026-08-08/09 for the
+# Inquiry Case Owners feature: backup DB + source on the server, rsync the
+# new source over, `docker compose build` (production builds images locally
+# from source — see docker-compose.prod.yml's own header comment — it does
+# NOT pull from a registry, unlike docker-compose.staging.yml), run the
+# one-shot `migrate` service, then `up -d` to restart api/web/caddy.
+#
+# ⚠️ This targets 91.223.61.70 directly — there is currently no separate
+# staging host (docker-compose.staging.yml / deploy-staging.yml were written
+# for one, but it was never provisioned; do not point PRODUCTION_SSH_HOST at
+# anything you intend to also use as "staging" — see the comment atop
+# docker-compose.staging.yml, which explicitly assumes a different host).
+#
+# ⚠️ Requires these repository secrets (Settings → Secrets and variables →
+# Actions) — none of this runs until they're set:
+#   PRODUCTION_SSH_HOST  — 91.223.61.70
+#   PRODUCTION_SSH_PORT  — 2222
+#   PRODUCTION_SSH_USER  — root (⚠️ not a hardened non-root deploy user —
+#                           same gap flagged in deploy-staging.yml's own
+#                           comment; fix by creating a dedicated user with
+#                           docker-group access and swapping this secret,
+#                           independent of this workflow)
+#   PRODUCTION_SSH_KEY   — the private key paired with a public key already
+#                           in root's authorized_keys on that host
+#
+# ⚠️ No `--delete` on the rsync below, deliberately — this is the first,
+# not-yet-battle-tested version of this automation. Stale removed files can
+# linger on the server rather than risk an exclude-list mistake silently
+# deleting something real. Revisit once this has proven itself over a few
+# real deploys.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy production
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: Checkout the exact commit CI validated
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PRODUCTION_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${{ secrets.PRODUCTION_SSH_PORT }}" "${{ secrets.PRODUCTION_SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Backup database and current source on the server
+        run: |
+          SHA_SHORT=$(echo "${{ github.event.workflow_run.head_sha }}" | cut -c1-7)
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.PRODUCTION_SSH_PORT }}" "${{ secrets.PRODUCTION_SSH_USER }}@${{ secrets.PRODUCTION_SSH_HOST }}" "
+            set -e
+            TS=\$(date +%Y%m%d_%H%M%S)
+            PGPASS=\$(docker exec septa_postgres printenv POSTGRES_PASSWORD)
+            docker exec -e PGPASSWORD=\"\$PGPASS\" septa_postgres pg_dump -U septa -d septa > /opt/septa_backup_pre_deploy_${SHA_SHORT}_\${TS}.sql
+            mkdir -p /opt/septa_pre_deploy_backup_${SHA_SHORT}
+            rsync -a --exclude node_modules --exclude dist --exclude .git /opt/septa/ /opt/septa_pre_deploy_backup_${SHA_SHORT}/
+          "
+
+      - name: Sync new source to the server
+        run: |
+          rsync -az \
+            --exclude node_modules --exclude .git --exclude dist \
+            --exclude .env.production --exclude apps/api/.env.production \
+            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.PRODUCTION_SSH_PORT }}" \
+            ./ "${{ secrets.PRODUCTION_SSH_USER }}@${{ secrets.PRODUCTION_SSH_HOST }}:/opt/septa/"
+
+      - name: Build, migrate, restart
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.PRODUCTION_SSH_PORT }}" "${{ secrets.PRODUCTION_SSH_USER }}@${{ secrets.PRODUCTION_SSH_HOST }}" "
+            set -e
+            cd /opt/septa
+            docker compose --env-file .env.production -f docker-compose.prod.yml build
+            docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+          "
+
+      - name: Verify health
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.PRODUCTION_SSH_PORT }}" "${{ secrets.PRODUCTION_SSH_USER }}@${{ secrets.PRODUCTION_SSH_HOST }}" "
+            set -e
+            for i in \$(seq 1 10); do
+              curl -sSf http://localhost/api/health && exit 0
+              sleep 3
+            done
+            echo 'Health check failed after deploy' >&2
+            exit 1
+          "
