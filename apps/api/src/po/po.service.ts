@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { PrismaService } from "../prisma/prisma.service";
 import { ActivityLogService } from "../inquiries/activity-log.service";
 import { SelectionService } from "../selection/selection.service";
+import { ActivitiesService } from "../activities/activities.service";
 import { SavePoDto, SaveSupplierPaymentDto } from "./dto/po.dto";
 
 /**
@@ -15,6 +16,7 @@ export class PoService {
     private readonly prisma: PrismaService,
     private readonly activityLog: ActivityLogService,
     private readonly selection: SelectionService,
+    private readonly activities: ActivitiesService,
   ) {}
 
   // ------------------------------------------------------------
@@ -108,6 +110,9 @@ export class PoService {
         tag: "stage_completed",
         metadata: { module: "po", action: "created", supplierId },
       });
+
+      // فاز ۵۸ — Trigger #۶: فقط وقتی PO همهٔ تأمین‌کننده‌های این سفارش صادر شده باشه
+      await this.advanceAfterAllPosIssued(inquiryId, order.id, currentUserId);
     } else {
       try {
         await this.prisma.purchaseOrder.update({
@@ -205,6 +210,45 @@ export class PoService {
       throw new BadRequestException("ابتدا باید سفارش مشتری (تب ۶) ثبت بشه");
     }
     return order;
+  }
+
+  /**
+   * فاز ۵۸ — Trigger #۶ (erp-database-design.md دامنه ۱۴). «صدور PO» در سطح کل پرونده یعنی
+   * PO همهٔ تأمین‌کنندگان متمایز این سفارش صادر شده باشه — نه فقط اولین PO — چون هنوز ممکنه
+   * تأمین‌کنندگان دیگه‌ای در انتظار PO باشن. alreadyOpen مانع باز شدن دوباره در PO آخر می‌شه.
+   */
+  private async advanceAfterAllPosIssued(inquiryId: string, orderId: string, currentUserId: string) {
+    const [distinctSuppliers, posIssued] = await Promise.all([
+      this.prisma.orderItem.findMany({ where: { orderId }, select: { supplierId: true }, distinct: ["supplierId"] }),
+      this.prisma.purchaseOrder.count({ where: { orderId } }),
+    ]);
+    if (posIssued < distinctSuppliers.length) return;
+
+    const alreadyOpen = await this.prisma.activity.findFirst({
+      where: {
+        relatedEntityType: "inquiry",
+        relatedEntityId: inquiryId,
+        relatedStageCode: "shipping_in_progress",
+        status: { notIn: ["completed", "cancelled"] },
+      },
+    });
+    if (alreadyOpen) return;
+
+    const inquiry = await this.prisma.inquiry.findUniqueOrThrow({
+      where: { id: inquiryId },
+      select: { procurementOwnerId: true, salesExpertId: true },
+    });
+
+    await this.activities.closeStageActivities(inquiryId, "po_pending", currentUserId);
+    await this.activities.openStageActivity({
+      inquiryId,
+      stageCode: "shipping_in_progress",
+      activityType: "internal_task",
+      subject: "پیگیری تولید، بسته‌بندی و حمل",
+      assignedToUserId: inquiry.procurementOwnerId ?? currentUserId,
+      triggeredByUserId: currentUserId,
+      extraWatcherUserIds: [inquiry.salesExpertId],
+    });
   }
 
   private async getPoOrThrow(inquiryId: string, supplierId: string) {

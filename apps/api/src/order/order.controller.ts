@@ -29,8 +29,12 @@ export class OrderController {
 
   @RequirePermissions("order.manage_payments")
   @Post("inquiries/:id/order/payments")
-  addPayment(@Param("id", ParseUUIDPipe) id: string, @Body() dto: SaveCustomerPaymentDto) {
-    return this.service.addPayment(id, dto);
+  addPayment(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: SaveCustomerPaymentDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.addPayment(id, dto, user.userId);
   }
 
   @RequirePermissions("order.manage_payments")

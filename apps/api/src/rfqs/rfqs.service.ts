@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { Prisma } from "../../generated/prisma";
 import { PrismaService } from "../prisma/prisma.service";
 import { ActivityLogService } from "../inquiries/activity-log.service";
+import { InquiriesService } from "../inquiries/inquiries.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { ActivitiesService } from "../activities/activities.service";
 import { MailService } from "../mail/mail.service";
@@ -61,6 +62,7 @@ export class RfqsService {
     private readonly config: ConfigService,
     private readonly notifications: NotificationsService,
     private readonly activities: ActivitiesService,
+    private readonly inquiries: InquiriesService,
   ) {}
 
   // ------------------------------------------------------------
@@ -150,6 +152,10 @@ export class RfqsService {
     // (InquiriesScheduler) بلافاصله پاک می‌شه، نه اینکه تا اجرای بعدی Cron باقی بمونه
     await this.notifications.clearForEntity("inquiry", inquiryId, "inquiry_awaiting_supplier_rfq");
 
+    // فاز ۵۸ — Procurement Owner: صرفاً وقتی هنوز خالیه، روی اولین اقدام واقعی RFQ این
+    // پرونده پر می‌شه (نگاه کنید به erp-database-design.md دامنه ۱۴)
+    await this.inquiries.autoAssignProcurementOwner(inquiryId, currentUserId);
+
     // فاز ۳۳ — ارسال ایمیل دیگه اینجا خودکار انجام نمی‌شه؛ کاربر بعد از پیش‌نمایش،
     // با فراخوانی جدای POST rfqs/:id/resend-email صریحاً ارسال رو انجام می‌ده.
     await this.activityLog.log({
@@ -164,18 +170,17 @@ export class RfqsService {
 
     // فاز ۳۱ — طبق مثال «Workflow Generated Action» در SPEC-PHASE-31 (سؤال باز #۳):
     // نه در لحظهٔ ایجاد استعلام، بلکه اینجا که مقصد واقعاً مشخصه — یک فعالیت پیگیری خودکار
-    // برای کارشناس بازرگانی با Deadline واقعی خودِ RFQ (نه عدد ثابت)
-    await this.activities.create(
-      {
-        activityType: "follow_up",
-        subject: `دریافت قیمت از «${supplier.companyName}» — ${rfq.rfqNumber}`,
-        relatedEntityType: "inquiry",
-        relatedEntityId: inquiryId,
-        dueAt: responseDueDate.toISOString(),
-        assignedToUserId: currentUserId,
-      },
-      currentUserId,
-    );
+    // برای کارشناس بازرگانی با Deadline واقعی خودِ RFQ (نه عدد ثابت). فاز ۵۸: با تگ
+    // procurement_awaiting_response (Trigger #۱ دامنه ۱۴) به‌جای activities.create عمومی.
+    await this.activities.openStageActivity({
+      inquiryId,
+      stageCode: "procurement_awaiting_response",
+      activityType: "follow_up",
+      subject: `دریافت قیمت از «${supplier.companyName}» — ${rfq.rfqNumber}`,
+      assignedToUserId: currentUserId,
+      triggeredByUserId: currentUserId,
+      dueAt: responseDueDate,
+    });
 
     return this.withComputedTotals(rfq);
   }
@@ -305,6 +310,8 @@ export class RfqsService {
       sourceRfqId: rfq.id,
     });
 
+    await this.advanceProcurementStage(rfq.inquiryId, currentUserId);
+
     return this.withComputedTotals(updated);
   }
 
@@ -382,6 +389,8 @@ export class RfqsService {
       metadata: { module: "rfq", action: "offer_received", offerId: offer.id },
       sourceRfqId: rfq.id,
     });
+
+    await this.advanceProcurementStage(rfq.inquiryId, currentUserId);
 
     return this.withComputedTotals(await this.getById(rfqId));
   }
@@ -627,6 +636,8 @@ export class RfqsService {
     // حذف قطعی — rfq_items و rfq_delete_requests با Cascade حذف می‌شن
     await this.prisma.supplierRfq.delete({ where: { id: rfq.id } });
 
+    await this.advanceProcurementStage(inquiryId, currentUserId);
+
     await this.notifications.create({
       userId: request.requestedBy,
       type: "rfq_delete_decided",
@@ -669,9 +680,59 @@ export class RfqsService {
         relatedEntityType: "supplier_rfq",
         relatedEntityId: rfq.id,
       });
+      await this.advanceProcurementStage(rfq.inquiryId, rfq.commercialExpertId);
     }
 
     return overdue.length;
+  }
+
+  // ------------------------------------------------------------
+  // فاز ۵۸ — Trigger #۱/#۲ چرخهٔ استعلام (erp-database-design.md دامنه ۱۴)
+  // ------------------------------------------------------------
+
+  /**
+   * بعد از هر رویدادی که یک RFQ رو به حالت پایانی می‌رسونه (offer_received/no_response/
+   * rejected_by_supplier، یا حذف کامل RFQ): اگه دیگه هیچ RFQ این پرونده در حالت میانی
+   * (awaiting_response/technical_question) نمونده و «انتخاب نهایی» هنوز قفل نشده، مرحلهٔ
+   * procurement_awaiting_response بسته و pricing_pending باز می‌شه.
+   * ⚠️ محدودیت شناخته‌شده: بازگشت دستی یک RFQ از no_response به awaiting_response
+   * (updateStatus، «پاسخ دیرهنگام») فعلاً هیچ Activity ای رو دوباره باز نمی‌کنه.
+   */
+  private async advanceProcurementStage(inquiryId: string, triggeredByUserId: string) {
+    const remaining = await this.prisma.supplierRfq.count({
+      where: { inquiryId, status: { in: ["awaiting_response", "technical_question"] } },
+    });
+    if (remaining > 0) return;
+
+    const totalRfqs = await this.prisma.supplierRfq.count({ where: { inquiryId } });
+    if (totalRfqs === 0) return; // آخرین RFQ حذف شد — چیزی برای قیمت‌گذاری نمونده
+
+    const inquiry = await this.prisma.inquiry.findUnique({
+      where: { id: inquiryId },
+      select: { selectionLockedAt: true, salesExpertId: true, procurementOwnerId: true },
+    });
+    if (!inquiry || inquiry.selectionLockedAt) return;
+
+    const alreadyOpen = await this.prisma.activity.findFirst({
+      where: {
+        relatedEntityType: "inquiry",
+        relatedEntityId: inquiryId,
+        relatedStageCode: "pricing_pending",
+        status: { notIn: ["completed", "cancelled"] },
+      },
+    });
+    if (alreadyOpen) return;
+
+    await this.activities.closeStageActivities(inquiryId, "procurement_awaiting_response", triggeredByUserId);
+    await this.activities.openStageActivity({
+      inquiryId,
+      stageCode: "pricing_pending",
+      activityType: "internal_task",
+      subject: "قیمت‌گذاری نهایی و انتخاب آفر",
+      assignedToUserId: inquiry.procurementOwnerId ?? triggeredByUserId,
+      triggeredByUserId,
+      extraWatcherUserIds: [inquiry.salesExpertId],
+    });
   }
 
   // ------------------------------------------------------------

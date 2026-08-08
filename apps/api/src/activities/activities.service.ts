@@ -217,6 +217,94 @@ export class ActivitiesService {
   }
 
   // ------------------------------------------------------------
+  // فاز ۵۸ — Trigger‌های خودکار چرخهٔ استعلام (SEPTA Case Owners / erp-database-design.md
+  // دامنه ۱۴). فقط برای فراخوانی داخلی سرویس‌های دامنه (Rfqs/Selection/Proposal/Outcome/
+  // Po/Shipping/Settlement) — به همین دلیل relatedStageCode در CreateActivityDto عمومی
+  // قرار نگرفت؛ کاربر از طریق API عمومی نمی‌تونه این تگ رو ست کنه.
+  // ------------------------------------------------------------
+
+  /** باز کردن Activity سیستمی یک مرحله برای یک پرونده. */
+  async openStageActivity(params: {
+    inquiryId: string;
+    stageCode: string;
+    activityType: string;
+    subject: string;
+    assignedToUserId: string;
+    triggeredByUserId: string;
+    dueAt?: Date;
+    priority?: string;
+    extraWatcherUserIds?: string[];
+  }) {
+    const activity = await this.prisma.activity.create({
+      data: {
+        activityType: params.activityType,
+        subject: params.subject,
+        relatedEntityType: "inquiry",
+        relatedEntityId: params.inquiryId,
+        relatedStageCode: params.stageCode,
+        priority: params.priority ?? "normal",
+        status: "open",
+        dueAt: params.dueAt,
+        assignedToUserId: params.assignedToUserId,
+        createdByUserId: params.triggeredByUserId,
+      },
+      include: ACTIVITY_INCLUDE,
+    });
+
+    // طبق تصمیم تأییدشده: Watcher باید مختص همون Trigger باشه، نه خودکار هر سه مالک —
+    // فراخواننده extraWatcherUserIds رو صریح می‌فرسته (مثلاً فقط مالک متقابل زنجیره)
+    const watcherIds = new Set([params.triggeredByUserId, params.assignedToUserId, ...(params.extraWatcherUserIds ?? [])]);
+    for (const userId of watcherIds) {
+      await this.prisma.taskWatcher.upsert({
+        where: { taskId_userId: { taskId: activity.id, userId } },
+        update: {},
+        create: { taskId: activity.id, userId, addedByUserId: params.triggeredByUserId },
+      });
+    }
+
+    await this.addTimelineEntry(
+      activity.id,
+      params.triggeredByUserId,
+      "activity",
+      `کار به‌صورت خودکار برای مرحلهٔ «${params.subject}» ایجاد شد`,
+      "created",
+    );
+
+    return activity;
+  }
+
+  /**
+   * بستن همهٔ Activity‌های باز یک مرحلهٔ سیستمی مشخص برای یک پرونده — پیش از باز
+   * شدن مرحلهٔ بعدی. ممکنه بیش از یکی باشه (مثلاً چند RFQ هم‌زمان در انتظار پاسخ).
+   */
+  async closeStageActivities(inquiryId: string, stageCode: string, triggeredByUserId: string) {
+    const open = await this.prisma.activity.findMany({
+      where: {
+        relatedEntityType: "inquiry",
+        relatedEntityId: inquiryId,
+        relatedStageCode: stageCode,
+        status: { notIn: TERMINAL_STATUSES },
+      },
+    });
+
+    for (const activity of open) {
+      await this.prisma.activity.update({
+        where: { id: activity.id },
+        data: { status: "completed", completedAt: new Date(), updatedAt: new Date() },
+      });
+      await this.addTimelineEntry(
+        activity.id,
+        triggeredByUserId,
+        "activity",
+        "مرحله تکمیل شد و این فعالیت به‌صورت خودکار بسته شد",
+        "stage_advanced",
+      );
+    }
+
+    return open.length;
+  }
+
+  // ------------------------------------------------------------
   // Work Management — Watcher/Timeline/ارجاع/ثبت نتیجهٔ ساختاریافته
   // ------------------------------------------------------------
 

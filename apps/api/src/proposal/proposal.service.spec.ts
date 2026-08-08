@@ -3,6 +3,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { ActivityLogService } from "../inquiries/activity-log.service";
 import { SelectionService } from "../selection/selection.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { ActivitiesService } from "../activities/activities.service";
 import { ProposalService } from "./proposal.service";
 import { ProposalNumberService } from "./proposal-number.service";
 
@@ -10,7 +11,8 @@ const INQUIRY_ID = "11111111-1111-1111-1111-111111111111";
 
 function buildPrisma() {
   const prisma: Record<string, unknown> = {
-    inquiry: { findUnique: jest.fn() },
+    inquiry: { findUnique: jest.fn(), findUniqueOrThrow: jest.fn() },
+    activity: { findFirst: jest.fn().mockResolvedValue(null) },
     currency: { findUnique: jest.fn() },
     supplierOfferItem: { findMany: jest.fn().mockResolvedValue([]) },
     financialProposal: {
@@ -54,7 +56,8 @@ function buildPrisma() {
 // فقط برای استخراج نوع بازگشتی buildPrisma بدون دوباره‌نویسی — خود این تابع صدا زده نمی‌شه
 function buildPrismaShape() {
   return {} as {
-    inquiry: { findUnique: jest.Mock };
+    inquiry: { findUnique: jest.Mock; findUniqueOrThrow: jest.Mock };
+    activity: { findFirst: jest.Mock };
     currency: { findUnique: jest.Mock };
     supplierOfferItem: { findMany: jest.Mock };
     financialProposal: { findFirst: jest.Mock; findMany: jest.Mock; count: jest.Mock; create: jest.Mock; update: jest.Mock };
@@ -121,24 +124,35 @@ function buildService(prisma: ReturnType<typeof buildPrisma>) {
   // ourEntity.findUnique پیش‌فرض null برمی‌گرده (buildPrisma) پس resolveOurEntity هم null می‌شه و
   // proposalNumber.nextNumber اصلاً صدا زده نمی‌شه — یک mock ساده کافیه، نیازی به پیاده‌سازی واقعی نیست
   const proposalNumber = { nextNumber: jest.fn().mockResolvedValue("2026-XX-0001") };
+  const activities = {
+    openStageActivity: jest.fn().mockResolvedValue({}),
+    closeStageActivities: jest.fn().mockResolvedValue(0),
+  };
   const service = new ProposalService(
     prisma as unknown as PrismaService,
     activityLog as unknown as ActivityLogService,
     selection as unknown as SelectionService,
     notifications as unknown as NotificationsService,
     proposalNumber as unknown as ProposalNumberService,
+    activities as unknown as ActivitiesService,
   );
-  return { service, activityLog, selection, notifications, proposalNumber };
+  return { service, activityLog, selection, notifications, proposalNumber, activities };
 }
 
 function mockLockedInquiry(prisma: ReturnType<typeof buildPrisma>) {
-  prisma.inquiry.findUnique.mockResolvedValue({
+  const base = {
     id: INQUIRY_ID,
     internalNumber: "INQ-2026-0001",
     managerNoteToSales: null,
     selectionLockedAt: new Date(),
     deletedAt: null,
-  });
+    // فاز ۵۸ — برای advanceToAwaitingCustomerOutcome (Trigger #۴) که findUniqueOrThrow می‌زنه
+    salesExpertId: "sales-1",
+    offerEndDate: new Date("2026-09-01"),
+    extendedOfferEndDate: null,
+  };
+  prisma.inquiry.findUnique.mockResolvedValue(base);
+  prisma.inquiry.findUniqueOrThrow.mockResolvedValue(base);
 }
 
 function autoCreate(prisma: ReturnType<typeof buildPrisma>) {
@@ -690,7 +704,7 @@ describe("ProposalService — ویرایش/ارسال/اصلاح مستقل هر
     // sendTechnical در پایان دوباره getProposal صدا می‌زنه — پیشنهاد مالی هم باید seed بشه
     prisma.financialProposal.findFirst.mockResolvedValue(null);
     autoCreate(prisma);
-    const { service, activityLog } = buildService(prisma);
+    const { service, activityLog, activities } = buildService(prisma);
 
     await service.sendTechnical(INQUIRY_ID, "user-1");
 
@@ -700,6 +714,17 @@ describe("ProposalService — ویرایش/ارسال/اصلاح مستقل هر
     expect(prisma.financialProposal.update).not.toHaveBeenCalled();
     expect(activityLog.log).toHaveBeenCalledWith(
       expect.objectContaining({ metadata: expect.objectContaining({ action: "technical_sent" }) }),
+    );
+    // فاز ۵۸ — Trigger #۴: ارسال هرکدوم (اینجا فنی) proposal_pending رو می‌بنده و
+    // awaiting_customer_outcome رو برای Sales Owner با مهلت واقعی استعلام باز می‌کنه
+    expect(activities.closeStageActivities).toHaveBeenCalledWith(INQUIRY_ID, "proposal_pending", "user-1");
+    expect(activities.openStageActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inquiryId: INQUIRY_ID,
+        stageCode: "awaiting_customer_outcome",
+        assignedToUserId: "sales-1",
+        dueAt: new Date("2026-09-01"),
+      }),
     );
   });
 

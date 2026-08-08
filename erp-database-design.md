@@ -747,6 +747,95 @@ Migration: `0028_payroll_engine_foundation` (۱۱ جدول جدید، کاملا
 
 ---
 
+## دامنه ۱۴: مالکیت پرونده (Case Owners) و وضعیت عملیاتی لیست استعلام‌ها 🆕 (فاز ۵۸ — تأییدشده، در انتظار پیاده‌سازی)
+
+⚠️ **یادداشت همگام‌سازی سند**: `schema.prisma`/پوشه `prisma/migrations` واقعی پروژه تا Migration `0044_rls_our_entity_backstop` جلوتر از این سند رفته (فازهای ۳۷ تا ۵۷ — مثلاً `inquiries.selection_base_currency_code`/`InquirySelectionExchangeRate` فاز ۵۷ — در `erp-schema.sql`/این سند مستند نشده بودن). این دامنه فقط قابلیت «مالکیت پرونده + وضعیت عملیاتی لیست استعلام‌ها» رو مستند می‌کنه؛ Backfill کامل فازهای عقب‌افتاده در این نسخه انجام نشد.
+
+هدف این دامنه: هر پرونده استعلام سه **مالک ثابت** (فروش/تأمین/مالی) داشته باشه، مرحلهٔ قیمت‌گذاری نهایی یک **Pricing Controller** مشخص داشته باشه، و لیست استعلام‌ها بر مبنای «نیاز به اقدام» به‌جای صرفاً `created_at` مرتب بشه — با حداکثر استفادهٔ مجدد از زیرساخت موجود (`activities`/`task_watchers`/`task_timeline_entries`/`permission_groups`)، **بدون جدول جدید** و **بدون سیستم دسترسی سطح-فیلد جدید**.
+
+### مالکان پرونده (Case Owners)
+
+| مالک | ستون | وضعیت |
+|---|---|---|
+| Sales Owner | `inquiries.sales_expert_id` | موجود — بدون تغییر، همون `inquiry.assign` فعلی |
+| Procurement Owner | `inquiries.procurement_owner_id` 🆕 nullable | Migration `0045_inquiry_case_owners` |
+| Finance Owner | `inquiries.finance_owner_id` 🆕 nullable | Migration `0045_inquiry_case_owners` |
+
+- **Procurement Owner** روی اولین اقدام واقعی روی `supplier_rfqs` این پرونده (اولین RFQ ساخته‌شده) خودکار به کارشناس ثبت‌کننده تنظیم می‌شه، اگه هنوز `NULL` باشه؛ بعدش با `PATCH inquiries/:id/procurement-owner` (کلید جدید `inquiry.assign_procurement_owner`، گرنت پیش‌فرض به گروه «بازرگانی») قابل تغییره.
+  ⚠️ **این ستون هیچ‌وقت `supplier_rfqs.commercial_expert_id` رو محدود یا override نمی‌کنه** — چون یک استعلام می‌تونه چند RFQ با کارشناسان بازرگانی متفاوت داشته باشه (طراحی موجود دامنهٔ ۳)؛ این ستون صرفاً پیش‌فرض تخصیص Activity/نمایش در لیسته، نه یک Access Gate.
+- **Finance Owner** روی اولین نوشتار واقعی مالی این پرونده (اولین `customer_payments` یا اولین `invoices` روی سفارش این پرونده، هرکدوم زودتر) خودکار به کاربر ثبت‌کننده تنظیم می‌شه؛ با `PATCH inquiries/:id/finance-owner` (کلید جدید `inquiry.assign_finance_owner`، گرنت پیش‌فرض به گروه «مالی») قابل تغییره. مصرف اصلی: assignee پیش‌فرض Activity‌های تسویه (نگاه کنید به جدول Trigger پایین).
+
+### Pricing Controller (تغییر نام از «Commercial Controller»)
+
+⚠️ بدون Entity/جدول/گروه دسترسی جدید — یک برچسب روی سه چیزی که از قبل موجودن:
+
+1. **بعد از تکمیل (رکورد دائمی)**: `inquiries.selection_locked_by`/`selection_locked_at` (موجود) — دقیقاً «چه کسی قیمت‌گذاری نهایی این پرونده رو انجام داد» رو ثبت می‌کنه؛ چیزی برای اضافه‌کردن نیست.
+2. **حین انجام (Assignee فعلی)**: ردیف `activities` مرحلهٔ `pricing_pending` (نگاه کنید به Trigger #۲ پایین) — کسی که Assignee اون Task‌ه، همون Pricing Controller فعلی این پرونده‌ست.
+3. **واجد شرایط بودن (Access)**: طبق تصمیم تأییدشده، فعلاً **بدون گروه دسترسی جدید** — همون گروه «مدیریت» می‌مونه، چون `selection.set_markup`/`selection.lock` امروز فقط از طریق `ALL_PERMISSION_KEYS` در دسترسه (گروه پیش‌فرض «بازرگانی» فقط `selection.view`/`selection.select_offer` داره، نه `set_markup`/`lock` — نگاه کنید به `permission-catalog.ts`). اگه بعداً کسب‌وکار خواست این دو کلید به یک گروه باریک‌تر از «مدیریت» تفویض بشه، فقط یک ردیف `permission_groups` سفارشی لازمه، بدون تغییر Schema/کد.
+
+### Activity-Driven Inquiry List — بدون جدول جدید
+
+`ActivitiesService`/`activities` (فاز ۱۶ به بعد) از قبل مکانیزم Assignee/Watcher/Timeline/Due Date/Priority/Status رو داره و از قبل حداقل یک نمونهٔ زنده از این الگو در کده: `RfqsService` همین الان بعد از ارسال RFQ یک `activities` (`activityType: "follow_up"`) با `dueAt = responseDueDate` می‌سازه (`rfqs.service.ts`). این دامنه همین الگو رو به ۹ گذار مرحله‌ای دیگهٔ چرخهٔ استعلام تعمیم می‌ده.
+
+⚠️ **یک نکتهٔ Schema که نیاز به تأیید جداگانه داره** (خارج از سه تصمیم تأییدشدهٔ بالا): چون در یک لحظه ممکنه چند `activities` باز هم‌زمان برای یک پرونده وجود داشته باشه (مثلاً چند RFQ هم‌زمان در انتظار پاسخ — هرکدوم یک Activity)، برای اینکه منطق «قبلی رو ببند، بعدی رو باز کن» و برچسب «مرحلهٔ فعلی» در لیست استعلام‌ها قابل‌اتکا باشه (نه با String-match روی `subject`)، پیشنهاد می‌شه یک ستون تگ سبک به `activities` اضافه بشه:
+```sql
+ALTER TABLE activities ADD COLUMN related_stage_code VARCHAR(30);
+```
+Nullable، فقط برای Activity‌های خودکار همین ۹ Trigger پر می‌شه؛ برای فعالیت‌های دستی/عمومی (تماس، جلسه، Mention و...) همیشه `NULL` می‌مونه — بدون اثر روی رفتار/دادهٔ موجود. **این ستون بخشی از تصمیمات تأییدشده نیست** — پیشنهادیه و منتظر تأیید جداست؛ بدونش هم می‌شه پیش رفت ولی تشخیص «کدوم Activity باز، مرحلهٔ سیستمیه» شکننده‌تر (بر مبنای Convention نام `subject`) می‌شه.
+
+**جدول Trigger مراحل (۹ گذار، به کد Stage نگاشت‌شده):**
+
+| # | نقطهٔ Trigger (سرویس) | `related_stage_code` | `activityType` | Assignee پیش‌فرض | `dueAt` | Watcher اضافه | بستن Activity قبلی |
+|---|---|---|---|---|---|---|---|
+| ۱ | `RfqsService` — ارسال RFQ (**از قبل پیاده‌سازی‌شده**، فقط نیاز به تگ) | `procurement_awaiting_response` | `follow_up` | فرستندهٔ RFQ (`commercial_expert_id`) | `response_due_date` | — | خودش (وقتی offer/no_response ثبت می‌شه) |
+| ۲ | همهٔ RFQهای پرونده به `offer_received`/`no_response` رسیدن، `selection_locked_at IS NULL` | `pricing_pending` | `internal_task` | `procurement_owner_id` (قابل واگذاری به Pricing Controller) | — | `sales_expert_id` | همهٔ بازمانده‌های `procurement_awaiting_response` همین پرونده |
+| ۳ | `SelectionService.lock()` | `proposal_pending` | `internal_task` | `sales_expert_id` | — | — | `pricing_pending` |
+| ۴ | ارسال نهایی پیشنهاد (`sent_at` مالی/فنی پر می‌شه) | `awaiting_customer_outcome` | `follow_up` | `sales_expert_id` | `offer_end_date`/`extended_offer_end_date` | — | `proposal_pending` |
+| ۵ | `OutcomeService.saveOutcome()` با حداقل یک قلم `result='won'` | `order_pending` (→`sales_expert_id`) و `po_pending` (→`procurement_owner_id`) — دو Activity | `internal_task` | طبق ستون قبل | — | متقابل (هرکدوم Watcher اون‌یکی) | `awaiting_customer_outcome` |
+| ۶ | `PoService` — صدور PO | `shipping_in_progress` | `internal_task` | `procurement_owner_id` | `delivery_due_date` PO | `sales_expert_id` | `po_pending` |
+| ۷ | `ShippingService`/`shipments.stage → 'cleared'` | `delivery_pending` | `internal_task` | `sales_expert_id` | — | `procurement_owner_id` | `shipping_in_progress` |
+| ۸ | `SettlementService` — `deliveries.customer_acceptance_status='accepted'` | `invoicing_pending` | `internal_task` | `finance_owner_id` (اگه هنوز `NULL`، موقت به `sales_expert_id`) | — | `sales_expert_id` | `delivery_pending` |
+| ۹ | `SettlementService` — صدور اولین `invoices` | `collection_pending` | `follow_up` | `finance_owner_id` | `payment_deadline` | `sales_expert_id` | `invoicing_pending` |
+
+- نتیجهٔ `lost`/`cancelled` در Trigger #۵: فقط `awaiting_customer_outcome` بسته می‌شه، Activity جدیدی باز نمی‌شه (پایان مسیر).
+- طبق تصمیم تأییدشده، برای این فاز **هیچ کدوم Watcher خودکار هر سه مالک هم‌زمان نمی‌گیرن** — فقط طرف مرتبط بعدی/قبلی زنجیره، تا از شلوغی اعلان جلوگیری بشه.
+- طبق تصمیم تأییدشده، مفهوم Approver پیاده‌سازی نمی‌شه؛ تنها گردش تأیید/رد موجود (`financial_proposal_price_change_requests`، فاز ۳۵-ج) دست‌نخورده می‌مونه.
+
+**کوئری لیست استعلام‌ها** (بدون تغییر Schema، فقط Query جدید در `InquiriesService`):
+```sql
+SELECT i.*, a.subject AS action_required, a.assigned_to_user_id AS action_assignee,
+       a.due_at, (a.status = 'overdue') AS is_overdue, a.priority,
+       a.related_stage_code AS workflow_stage
+FROM inquiries i
+LEFT JOIN LATERAL (
+  SELECT * FROM activities
+  WHERE related_entity_type = 'inquiry' AND related_entity_id = i.id
+    AND status NOT IN ('completed', 'cancelled')
+  ORDER BY created_at DESC LIMIT 1
+) a ON true
+ORDER BY
+  (a.status = 'overdue' OR a.priority = 'urgent') DESC,
+  a.due_at ASC NULLS LAST,
+  CASE a.priority WHEN 'urgent' THEN 4 WHEN 'high' THEN 3 WHEN 'normal' THEN 2 WHEN 'low' THEN 1 ELSE 0 END DESC,
+  i.updated_at DESC;
+```
+مرحلهٔ فعلی برای پرونده‌های بدون Activity باز (تازه‌ثبت‌شده، یا `lost`/`cancelled`/تسویه‌شدهٔ کامل) در سطح اپلیکیشن Fallback به یک برچسب مشتق از `inquiries.status` می‌گیره، نه از `activities`.
+
+طبق تصمیم تأییدشده، این فعالیت‌ها فعلاً وارد `WorkPanel`/Action Center سراسری نمی‌شن — فقط در لیست استعلام‌ها مصرف می‌شن؛ اتصال به `ActionRuleProvider` (فاز ۳۱) برای فاز بعد باقی می‌مونه.
+
+### تغییرات دسترسی (RBAC موجود، بدون کلید سطح-فیلد)
+
+دو کلید جدید در ماژول `inquiry` (`permission-catalog.ts`)، هم‌الگوی `inquiry.assign` موجود:
+
+| کلید | برچسب | گروه پیش‌فرض |
+|---|---|---|
+| `inquiry.assign_procurement_owner` | واگذاری مالک تأمین پرونده | بازرگانی (+ مدیریت) |
+| `inquiry.assign_finance_owner` | واگذاری مالک مالی پرونده | مالی (+ مدیریت) |
+
+هیچ کلید/گروه دیگه‌ای لازم نیست — محافظت اطلاعات بازرگانی (`inquiry.view_commercial_details`، حذف `purchase_price` از پاسخ پیشنهاد در فاز ۳۵-ب، `comment_text_restricted`) دقیقاً به همون شکل موجود باقی می‌مونه.
+
+---
+
 ## 🎉 جمع‌بندی کامل دیتابیس
 
 هر ۱۲ دامنه (۸۰+ جدول) طراحی و در `erp-schema.sql` نوشته شدن (+ دامنه ۱۳ گزارش‌ها، بدون جدول جدید):
@@ -765,6 +854,10 @@ Migration: `0028_payroll_engine_foundation` (۱۱ جدول جدید، کاملا
 | ۱۰. خزانه‌داری و برنامه‌ریزی مالی | budgets, expense_requests, payment_requests, financial_calendar_events, financial_kpis |
 | ۱۱. منابع انسانی | employees, employee_contracts, leave_requests, payroll_periods (Legacy)، payslips (Legacy) |
 | ۱۲. موتور حقوق و دستمزد 🆕 | payroll_rule_versions, payroll_rules, payroll_formulas, payroll_components, payroll_results |
+| ۱۳. گزارش‌ها و تحلیل‌ها | بدون جدول جدید (Query روی دامنه‌های ۲/۴/۵/۱۰) |
+| ۱۴. مالکیت پرونده و وضعیت عملیاتی 🆕 | inquiries.procurement_owner_id / finance_owner_id (Migration `0045`)، بدون جدول جدید — استفادهٔ مجدد از activities |
+
+⚠️ جدول بالا هنوز فقط دامنه‌های ۱ تا ۱۴ رو پوشش می‌ده؛ فازهای واقعی پروژه تا Migration `0044` (فراتر از فاز ۴۹ که آخرین نقطهٔ مستندشدهٔ قبل از این ضمیمه بود) جلوترن — نگاه کنید به یادداشت همگام‌سازی ابتدای دامنه ۱۴.
 
 ### سوالات باز باقی‌مانده (برای فاز پیاده‌سازی):
 1. منبع دقیق API نرخ ارز خودکار (`exchange_rates.source`)
@@ -774,6 +867,7 @@ Migration: `0028_payroll_engine_foundation` (۱۱ جدول جدید، کاملا
 5. ~~**(دامنه ۱۱)** فرمول دقیق محاسبه اضافه‌کاری/کسورات بیمه/مالیات طبق قانون کار ایران~~ — **حل شد در دامنه ۱۲**: به‌جای فرمول ثابت در کد، نرخ‌ها/پله‌ها/فرمول‌ها همگی در `payroll_rules`/`payroll_tax_brackets`/`payroll_formulas` نسخه‌بندی‌شده ذخیره می‌شن؛ عدد دقیق قانون کار ایران در فاز پیاده‌سازی/seed اولیه توسط کارشناس منابع انسانی وارد می‌شه، نه در کد
 6. **(دامنه ۱۱)** آیا حضور و غیاب قراره به یک دستگاه فیزیکی (ساعت‌زن) وصل بشه؟ اگه بله، فرمت داده ورودی از اون سیستم باید مشخص بشه — `payroll_work_logs` (دامنه ۱۲) از `attendance_records` موجود تجمیع می‌شه، پس این سوال هنوز برای خود `attendance_records` باز می‌مونه
 7. **(دامنه ۱۲)** آیا `payroll_components`/فرمول‌ها یک پنل ادمین کامل (ویرایش تعاملی فرمول با پیش‌نمایش زنده) می‌خوان، یا فرم‌های فعلی (کد+عبارت متنی) برای کارشناس حقوق و دستمزد کافیه؟
+8. **(دامنه ۱۴)** آیا `activities.related_stage_code` (ستون تگ پیشنهادی، جدا از دو تصمیم تأییدشدهٔ Migration `0045`) تأیید می‌شه؟ بدونش، تشخیص «کدوم Activity باز، مرحلهٔ سیستمیه» باید با Convention نام `subject`/`activityType` انجام بشه که شکننده‌تره.
 
 ---
 

@@ -1,5 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { InquiriesService } from "../inquiries/inquiries.service";
+import { ActivitiesService } from "../activities/activities.service";
 import { SaveCollectionDto, SaveInvoiceItemDto, UpdateDeliveryDto, UpsertInvoiceDto } from "./dto/settlement.dto";
 
 /**
@@ -10,7 +12,11 @@ import { SaveCollectionDto, SaveInvoiceItemDto, UpdateDeliveryDto, UpsertInvoice
  */
 @Injectable()
 export class SettlementService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly inquiries: InquiriesService,
+    private readonly activities: ActivitiesService,
+  ) {}
 
   // ------------------------------------------------------------
   // تحویل به مشتری
@@ -22,9 +28,10 @@ export class SettlementService {
     return this.formatDelivery(delivery);
   }
 
-  async updateDelivery(inquiryId: string, dto: UpdateDeliveryDto) {
+  async updateDelivery(inquiryId: string, dto: UpdateDeliveryDto, currentUserId: string) {
     const orderId = await this.getOrderIdOrThrow(inquiryId);
     const delivery = await this.getOrSeedDelivery(orderId);
+    const wasAccepted = delivery.customerAcceptanceStatus === "accepted";
     const updated = await this.prisma.delivery.update({
       where: { id: delivery.id },
       data: {
@@ -37,6 +44,12 @@ export class SettlementService {
         updatedAt: new Date(),
       },
     });
+
+    // فاز ۵۸ — Trigger #۸ (erp-database-design.md دامنه ۱۴): فقط روی گذار واقعی به accepted
+    if (!wasAccepted && updated.customerAcceptanceStatus === "accepted") {
+      await this.advanceToInvoicingPending(inquiryId, currentUserId);
+    }
+
     return this.formatDelivery(updated);
   }
 
@@ -85,7 +98,7 @@ export class SettlementService {
     };
   }
 
-  async upsertInvoice(inquiryId: string, dto: UpsertInvoiceDto) {
+  async upsertInvoice(inquiryId: string, dto: UpsertInvoiceDto, currentUserId: string) {
     const orderId = await this.getOrderIdOrThrow(inquiryId);
     await this.assertAcceptanceComplete(orderId);
 
@@ -110,6 +123,11 @@ export class SettlementService {
             finalAmountIrr: 0,
           },
         });
+
+        // فاز ۵۸ — Trigger #۹: اولین فاکتور این سفارش. اگه هنوز کسی به‌عنوان مالک مالی ثبت
+        // نشده (مثلاً هیچ پیش‌پرداختی هم قبلاً ثبت نشده)، همینجا خودکار پر می‌شه
+        await this.inquiries.autoAssignFinanceOwner(inquiryId, currentUserId);
+        await this.advanceToCollectionPending(inquiryId, currentUserId, dto.paymentDeadline);
       }
     } catch (err) {
       if ((err as { code?: string }).code === "P2002") {
@@ -295,6 +313,49 @@ export class SettlementService {
       throw new BadRequestException("ابتدا باید فاکتور نهایی صادر بشه");
     }
     return invoice;
+  }
+
+  /** فاز ۵۸ — Trigger #۸: تحویل تأیید مشتری گرفت → invoicing_pending برای Finance Owner */
+  private async advanceToInvoicingPending(inquiryId: string, currentUserId: string) {
+    const inquiry = await this.prisma.inquiry.findUniqueOrThrow({
+      where: { id: inquiryId },
+      select: { salesExpertId: true, financeOwnerId: true },
+    });
+    // اگه هنوز هیچ مالک مالی‌ای ثبت نشده (نه پیش‌پرداخت، نه فاکتور قبلی) موقتاً به فروش
+    // واگذار می‌شه تا خودش به مالی ارجاع بده — طبق محدودیت شناخته‌شدهٔ دامنه ۱۴
+    const assignee = inquiry.financeOwnerId ?? inquiry.salesExpertId;
+
+    await this.activities.closeStageActivities(inquiryId, "delivery_pending", currentUserId);
+    await this.activities.openStageActivity({
+      inquiryId,
+      stageCode: "invoicing_pending",
+      activityType: "internal_task",
+      subject: "صدور فاکتور نهایی",
+      assignedToUserId: assignee,
+      triggeredByUserId: currentUserId,
+      extraWatcherUserIds: [inquiry.salesExpertId],
+    });
+  }
+
+  /** فاز ۵۸ — Trigger #۹: اولین فاکتور صادر شد → collection_pending برای Finance Owner */
+  private async advanceToCollectionPending(inquiryId: string, currentUserId: string, paymentDeadline?: string) {
+    const inquiry = await this.prisma.inquiry.findUniqueOrThrow({
+      where: { id: inquiryId },
+      select: { salesExpertId: true, financeOwnerId: true },
+    });
+    const assignee = inquiry.financeOwnerId ?? currentUserId;
+
+    await this.activities.closeStageActivities(inquiryId, "invoicing_pending", currentUserId);
+    await this.activities.openStageActivity({
+      inquiryId,
+      stageCode: "collection_pending",
+      activityType: "follow_up",
+      subject: "پیگیری وصول مطالبات",
+      assignedToUserId: assignee,
+      triggeredByUserId: currentUserId,
+      dueAt: paymentDeadline ? new Date(paymentDeadline) : undefined,
+      extraWatcherUserIds: [inquiry.salesExpertId],
+    });
   }
 
   private async assertAcceptanceComplete(orderId: string) {

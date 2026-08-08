@@ -3,6 +3,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { ActivityLogService } from "../inquiries/activity-log.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { PermissionsService } from "../permissions/permissions.service";
+import { ActivitiesService } from "../activities/activities.service";
 import { ShipmentsService } from "./shipments.service";
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
@@ -19,6 +20,10 @@ function buildPrisma() {
     shipmentEditRequest: { create: jest.fn(), findFirst: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
     user: { findMany: jest.fn().mockResolvedValue([]) },
     package: { findMany: jest.fn().mockResolvedValue([]) },
+    activity: { findFirst: jest.fn().mockResolvedValue(null) },
+    inquiry: {
+      findUniqueOrThrow: jest.fn().mockResolvedValue({ salesExpertId: "sales-1", procurementOwnerId: "proc-1" }),
+    },
   };
 }
 
@@ -30,13 +35,18 @@ function buildService(prisma: ReturnType<typeof buildPrisma>, approverIds: strin
       key === "shipping.approve_edit" ? approverIds.includes(userId) : false,
     ),
   };
+  const activities = {
+    openStageActivity: jest.fn().mockResolvedValue({}),
+    closeStageActivities: jest.fn().mockResolvedValue(0),
+  };
   const service = new ShipmentsService(
     prisma as unknown as PrismaService,
     activityLog as unknown as ActivityLogService,
     notifications as unknown as NotificationsService,
     permissions as unknown as PermissionsService,
+    activities as unknown as ActivitiesService,
   );
-  return { service, activityLog, notifications, permissions };
+  return { service, activityLog, notifications, permissions, activities };
 }
 
 function baseShipment(stage: string, extra: Record<string, unknown> = {}) {
@@ -83,6 +93,39 @@ describe("ShipmentsService — پیشروی یک‌طرفه مرحله", () => {
     expect(activityLog.log).toHaveBeenCalledWith(
       expect.objectContaining({ inquiryId: "inq-1", tag: "status_change" }),
     );
+  });
+
+  it("فاز ۵۸: رسیدن به cleared، shipping_in_progress رو می‌بنده و delivery_pending رو برای Sales Owner باز می‌کنه", async () => {
+    const prisma = buildPrisma();
+    prisma.shipment.findUnique.mockResolvedValue(baseShipment("customs_declared"));
+    prisma.package.findMany.mockResolvedValue([{ po: { order: { inquiryId: "inq-1" } } }]);
+    const { service, activities } = buildService(prisma);
+
+    await service.advance(SHIPMENT_ID, USER_ID);
+
+    expect(prisma.shipment.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ stage: "cleared" }) }),
+    );
+    expect(activities.closeStageActivities).toHaveBeenCalledWith("inq-1", "shipping_in_progress", USER_ID);
+    expect(activities.openStageActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inquiryId: "inq-1",
+        stageCode: "delivery_pending",
+        assignedToUserId: "sales-1",
+        extraWatcherUserIds: ["proc-1"],
+      }),
+    );
+  });
+
+  it("فاز ۵۸: عبور بین مراحل میانی (نه رسیدن به cleared) delivery_pending باز نمی‌کنه", async () => {
+    const prisma = buildPrisma();
+    prisma.shipment.findUnique.mockResolvedValue(baseShipment("export_declared"));
+    prisma.package.findMany.mockResolvedValue([{ po: { order: { inquiryId: "inq-1" } } }]);
+    const { service, activities } = buildService(prisma);
+
+    await service.advance(SHIPMENT_ID, USER_ID);
+
+    expect(activities.openStageActivity).not.toHaveBeenCalled();
   });
 
   it("rejects advancing past the last stage (cleared)", async () => {

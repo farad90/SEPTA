@@ -26,6 +26,8 @@ const RFQ_PENDING_NOTIFICATION_TYPE = "inquiry_awaiting_supplier_rfq";
 const LIST_INCLUDE = {
   buyer: { select: { id: true, companyName: true } },
   salesExpert: { select: { id: true, fullName: true } },
+  procurementOwner: { select: { id: true, fullName: true } },
+  financeOwner: { select: { id: true, fullName: true } },
   _count: { select: { items: true, rfqs: true } },
   items: {
     select: {
@@ -36,6 +38,38 @@ const LIST_INCLUDE = {
     },
   },
 } satisfies Prisma.InquiryInclude;
+
+// فاز ۵۸ — برچسب فارسی هر مرحلهٔ سیستمی چرخهٔ استعلام (activities.related_stage_code)،
+// نگاه کنید به erp-database-design.md دامنه ۱۴ برای جدول کامل Trigger
+const STAGE_CODE_LABEL: Record<string, string> = {
+  procurement_awaiting_response: "در انتظار پاسخ تأمین‌کننده",
+  pricing_pending: "در انتظار قیمت‌گذاری نهایی",
+  proposal_pending: "در حال تهیهٔ پیشنهاد",
+  awaiting_customer_outcome: "در انتظار پاسخ مشتری",
+  order_pending: "در انتظار ثبت سفارش",
+  po_pending: "در انتظار صدور سفارش خرید",
+  shipping_in_progress: "در حال حمل",
+  delivery_pending: "در انتظار تحویل/دریافت انبار",
+  invoicing_pending: "در انتظار صدور فاکتور",
+  collection_pending: "در انتظار وصول مطالبات",
+};
+
+// سقف ایمنی برای مرتب‌سازی «نیاز به اقدام» — چون ترتیب به جدول activities (جدا) وابسته‌ست
+// و Prisma نمی‌تونه این رو در یک findMany صفحه‌بندی‌شده در سطح دیتابیس انجام بده، پرونده‌های
+// مطابق فیلتر تا همین سقف کامل خونده و در سطح اپلیکیشن مرتب/صفحه‌بندی می‌شن (نگاه کنید به
+// listByActionOrder). فراتر از این سقف، پرونده‌های اضافه در این حالت مرتب‌سازی دیده نمی‌شن.
+const ACTION_SORT_SAFETY_LIMIT = 2000;
+
+type ActionActivity = {
+  relatedEntityId: string | null;
+  subject: string;
+  assignedToUserId: string;
+  assignedTo: { id: string; fullName: string };
+  dueAt: Date | null;
+  status: string;
+  priority: string;
+  relatedStageCode: string | null;
+};
 
 type ListRowItem = Prisma.InquiryGetPayload<{ include: typeof LIST_INCLUDE }>["items"][number];
 
@@ -83,6 +117,8 @@ const DETAIL_INCLUDE = {
   buyer: { select: { id: true, companyName: true, partnerType: true } },
   buyerContact: { select: { id: true, contactName: true, mobile: true, email: true } },
   salesExpert: { select: { id: true, fullName: true } },
+  procurementOwner: { select: { id: true, fullName: true } },
+  financeOwner: { select: { id: true, fullName: true } },
   createdBy: { select: { id: true, fullName: true } },
   items: {
     orderBy: { rowIndex: "asc" },
@@ -220,12 +256,16 @@ export class InquiriesService {
       where = this.applyOwnershipScope(where, currentUserId);
     }
 
+    if (query.sortBy === "action") {
+      return this.listByActionOrder(where, page, pageSize);
+    }
+
     const orderBy: Prisma.InquiryOrderByWithRelationInput =
       query.sortBy === "deadline"
         ? { offerEndDate: query.sortDir ?? "asc" }
         : { createdAt: query.sortDir ?? "desc" };
 
-    const [items, total] = await this.prisma.$transaction([
+    const [rows, total] = await this.prisma.$transaction([
       this.prisma.inquiry.findMany({
         where,
         include: LIST_INCLUDE,
@@ -236,16 +276,120 @@ export class InquiriesService {
       this.prisma.inquiry.count({ where }),
     ]);
 
+    const decorated = await this.attachActionState(rows);
     return {
-      items: items.map(({ items: rowItems, ...row }) => ({
-        ...row,
-        stageLabel: deriveStageLabel(row),
-        builders: extractBuilders(rowItems),
-        saleValueByCurrency: computeSaleValueByCurrency(rowItems),
-      })),
+      items: decorated.map(({ row, activity }) => this.toListRow(row, activity)),
       total,
       page,
       pageSize,
+    };
+  }
+
+  /**
+   * فاز ۵۸ — لیست استعلام‌ها با مرتب‌سازی «نیاز به اقدام» (نگاه کنید به تصمیم تأییدشدهٔ
+   * دامنه ۱۴): فوری/عقب‌افتاده اول → نزدیک‌ترین سررسید → اولویت → آخرین به‌روزرسانی.
+   * چون ترتیب به آخرین Activity باز (جدول جدا) وابسته‌ست، Prisma نمی‌تونه این رو در یک
+   * findMany صفحه‌بندی‌شده در سطح دیتابیس انجام بده — رکوردهای مطابق فیلتر تا سقف
+   * ACTION_SORT_SAFETY_LIMIT کامل خونده می‌شن و مرتب/صفحه‌بندی در سطح اپلیکیشنه.
+   */
+  private async listByActionOrder(
+    where: Prisma.InquiryWhereInput,
+    page: number,
+    pageSize: number,
+  ) {
+    const total = await this.prisma.inquiry.count({ where });
+    const rows = await this.prisma.inquiry.findMany({
+      where,
+      include: LIST_INCLUDE,
+      orderBy: { updatedAt: "desc" },
+      take: ACTION_SORT_SAFETY_LIMIT,
+    });
+
+    const decorated = await this.attachActionState(rows);
+    const priorityRank: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
+
+    decorated.sort((a, b) => {
+      const urgentA = a.isOverdue || a.activity?.priority === "urgent";
+      const urgentB = b.isOverdue || b.activity?.priority === "urgent";
+      if (urgentA !== urgentB) return urgentA ? -1 : 1;
+
+      const dueA = a.activity?.dueAt?.getTime() ?? Infinity;
+      const dueB = b.activity?.dueAt?.getTime() ?? Infinity;
+      if (dueA !== dueB) return dueA - dueB;
+
+      const rankA = priorityRank[a.activity?.priority ?? ""] ?? 0;
+      const rankB = priorityRank[b.activity?.priority ?? ""] ?? 0;
+      if (rankA !== rankB) return rankB - rankA;
+
+      return b.row.updatedAt.getTime() - a.row.updatedAt.getTime();
+    });
+
+    const start = (page - 1) * pageSize;
+    const paged = decorated.slice(start, start + pageSize);
+
+    return {
+      items: paged.map(({ row, activity }) => this.toListRow(row, activity)),
+      total,
+      page,
+      pageSize,
+    };
+  }
+
+  /** آخرین Activity باز مرتبط با هر پرونده (اگه وجود داشته باشه) — یک کوئری برای کل صفحه */
+  private async attachActionState<T extends { id: string; updatedAt: Date }>(rows: T[]) {
+    if (rows.length === 0) {
+      return rows.map((row) => ({ row, activity: null as ActionActivity | null, isOverdue: false }));
+    }
+
+    const activities = await this.prisma.activity.findMany({
+      where: {
+        relatedEntityType: "inquiry",
+        relatedEntityId: { in: rows.map((r) => r.id) },
+        status: { notIn: ["completed", "cancelled"] },
+      },
+      orderBy: { createdAt: "desc" },
+      distinct: ["relatedEntityId"],
+      select: {
+        relatedEntityId: true,
+        subject: true,
+        assignedToUserId: true,
+        assignedTo: { select: { id: true, fullName: true } },
+        dueAt: true,
+        status: true,
+        priority: true,
+        relatedStageCode: true,
+      },
+    });
+    const byInquiry = new Map(activities.map((a) => [a.relatedEntityId!, a]));
+    const now = Date.now();
+
+    return rows.map((row) => {
+      const activity = byInquiry.get(row.id) ?? null;
+      const isOverdue =
+        !!activity && (activity.status === "overdue" || (!!activity.dueAt && activity.dueAt.getTime() < now));
+      return { row, activity, isOverdue };
+    });
+  }
+
+  private toListRow(
+    row: Prisma.InquiryGetPayload<{ include: typeof LIST_INCLUDE }>,
+    activity: ActionActivity | null,
+  ) {
+    const { items: rowItems, ...rest } = row;
+    const isOverdue =
+      !!activity && (activity.status === "overdue" || (!!activity.dueAt && activity.dueAt.getTime() < Date.now()));
+
+    return {
+      ...rest,
+      stageLabel:
+        (activity?.relatedStageCode && STAGE_CODE_LABEL[activity.relatedStageCode]) || deriveStageLabel(row),
+      builders: extractBuilders(rowItems),
+      saleValueByCurrency: computeSaleValueByCurrency(rowItems),
+      actionRequired: activity?.subject ?? null,
+      actionAssignee: activity?.assignedTo ?? null,
+      actionDueAt: activity?.dueAt ?? null,
+      actionOverdue: isOverdue,
+      actionPriority: activity?.priority ?? null,
     };
   }
 
@@ -540,6 +684,102 @@ export class InquiriesService {
     });
 
     return updated;
+  }
+
+  /**
+   * فاز ۵۸ — واگذاری دستی Procurement Owner (نگاه کنید به erp-database-design.md دامنه ۱۴).
+   * صرفاً پیش‌فرض تخصیص Activity/نمایشه — هیچ اثری روی supplier_rfqs.commercial_expert_id نداره.
+   */
+  async assignProcurementOwner(id: string, procurementOwnerId: string, currentUserId: string) {
+    const existing = await this.getById(id);
+    const newOwner = await this.prisma.user.findUnique({
+      where: { id: procurementOwnerId },
+      select: { id: true, fullName: true, status: true },
+    });
+    if (!newOwner || newOwner.status !== "active") {
+      throw new NotFoundException("کارشناس مقصد یافت نشد یا غیرفعاله");
+    }
+    if (existing.procurementOwnerId === procurementOwnerId) {
+      throw new BadRequestException("این کارشناس همین حالا مالک تأمین این پرونده‌ست");
+    }
+
+    const updated = await this.prisma.inquiry.update({
+      where: { id },
+      data: { procurementOwnerId, updatedAt: new Date() },
+      include: DETAIL_INCLUDE,
+    });
+
+    await this.activityLog.log({
+      inquiryId: id,
+      authorId: currentUserId,
+      text: `مالک تأمین پرونده به «${newOwner.fullName}» واگذار شد`,
+      tag: "general",
+      metadata: { module: "inquiry", action: "procurement_owner_assigned", to: procurementOwnerId },
+    });
+
+    return updated;
+  }
+
+  /** فاز ۵۸ — واگذاری دستی Finance Owner، هم‌الگوی assignProcurementOwner */
+  async assignFinanceOwner(id: string, financeOwnerId: string, currentUserId: string) {
+    const existing = await this.getById(id);
+    const newOwner = await this.prisma.user.findUnique({
+      where: { id: financeOwnerId },
+      select: { id: true, fullName: true, status: true },
+    });
+    if (!newOwner || newOwner.status !== "active") {
+      throw new NotFoundException("کارشناس مقصد یافت نشد یا غیرفعاله");
+    }
+    if (existing.financeOwnerId === financeOwnerId) {
+      throw new BadRequestException("این کارشناس همین حالا مالک مالی این پرونده‌ست");
+    }
+
+    const updated = await this.prisma.inquiry.update({
+      where: { id },
+      data: { financeOwnerId, updatedAt: new Date() },
+      include: DETAIL_INCLUDE,
+    });
+
+    await this.activityLog.log({
+      inquiryId: id,
+      authorId: currentUserId,
+      text: `مالک مالی پرونده به «${newOwner.fullName}» واگذار شد`,
+      tag: "general",
+      metadata: { module: "inquiry", action: "finance_owner_assigned", to: financeOwnerId },
+    });
+
+    return updated;
+  }
+
+  /**
+   * فاز ۵۸ — خودکار، فقط وقتی هنوز NULL باشه (اولین اقدام واقعی همون دامنه مالک رو تعیین
+   * می‌کنه). idempotent و بی‌صدا — بدون Activity Log، چون بخشی از یک فرآیند بزرگ‌تره
+   * (مثلاً ثبت RFQ) که خودش لاگ مربوط به خودشو داره.
+   */
+  private async autoAssignOwnerIfMissing(
+    inquiryId: string,
+    field: "procurementOwnerId" | "financeOwnerId",
+    userId: string,
+  ) {
+    const inquiry = await this.prisma.inquiry.findUnique({
+      where: { id: inquiryId },
+      select: { procurementOwnerId: true, financeOwnerId: true },
+    });
+    if (!inquiry || inquiry[field]) return;
+    await this.prisma.inquiry.update({
+      where: { id: inquiryId },
+      data: { [field]: userId, updatedAt: new Date() },
+    });
+  }
+
+  /** فاز ۵۸ — RfqsService اولین اقدام RFQ رو صدا می‌زنه؛ مالک تأمین رو در صورت خالی‌بودن پر می‌کنه */
+  async autoAssignProcurementOwner(inquiryId: string, userId: string) {
+    return this.autoAssignOwnerIfMissing(inquiryId, "procurementOwnerId", userId);
+  }
+
+  /** فاز ۵۸ — SettlementService اولین نوشتار مالی رو صدا می‌زنه؛ مالک مالی رو در صورت خالی‌بودن پر می‌کنه */
+  async autoAssignFinanceOwner(inquiryId: string, userId: string) {
+    return this.autoAssignOwnerIfMissing(inquiryId, "financeOwnerId", userId);
   }
 
   /**

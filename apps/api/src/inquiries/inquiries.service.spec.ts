@@ -35,6 +35,8 @@ function buildPrisma() {
     itemCatalog: { findMany: jest.fn() },
     user: { findMany: jest.fn().mockResolvedValue([]), findUnique: jest.fn() },
     supplierRfq: { count: jest.fn().mockResolvedValue(0) },
+    // فاز ۵۸ — attachActionState (لیست استعلام‌ها) آخرین Activity باز هر پرونده رو می‌خونه
+    activity: { findMany: jest.fn().mockResolvedValue([]) },
     $transaction: jest.fn(),
   };
 }

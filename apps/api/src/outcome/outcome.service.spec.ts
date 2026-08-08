@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { ActivityLogService } from "../inquiries/activity-log.service";
+import { ActivitiesService } from "../activities/activities.service";
 import { OutcomeService } from "./outcome.service";
 
 const INQUIRY_ID = "11111111-1111-1111-1111-111111111111";
@@ -9,7 +10,12 @@ const ITEM_2 = "33333333-3333-3333-3333-333333333333";
 
 function buildPrisma() {
   return {
-    inquiry: { findUnique: jest.fn(), update: jest.fn() },
+    inquiry: {
+      findUnique: jest.fn(),
+      // فاز ۵۸ — advanceAfterOutcome (Trigger #۵) وقتی حداقل یک قلم برد داره صداش می‌زنه
+      findUniqueOrThrow: jest.fn().mockResolvedValue({ salesExpertId: "sales-1", procurementOwnerId: "proc-1" }),
+      update: jest.fn(),
+    },
     inquiryItemOutcome: { upsert: jest.fn() },
     $transaction: jest.fn(async (ops: unknown[]) => Promise.all(ops as Promise<unknown>[])),
   };
@@ -17,11 +23,16 @@ function buildPrisma() {
 
 function buildService(prisma: ReturnType<typeof buildPrisma>) {
   const activityLog = { log: jest.fn().mockResolvedValue({}) };
+  const activities = {
+    openStageActivity: jest.fn().mockResolvedValue({}),
+    closeStageActivities: jest.fn().mockResolvedValue(0),
+  };
   const service = new OutcomeService(
     prisma as unknown as PrismaService,
     activityLog as unknown as ActivityLogService,
+    activities as unknown as ActivitiesService,
   );
-  return { service, activityLog };
+  return { service, activityLog, activities };
 }
 
 function mockInquiryWithItems(prisma: ReturnType<typeof buildPrisma>, itemIds: string[]) {
@@ -60,7 +71,7 @@ describe("OutcomeService — قوانین کسب‌وکاری", () => {
   it("won_all sets every item to won and inquiry.status to won", async () => {
     const prisma = buildPrisma();
     mockInquiryWithItems(prisma, [ITEM_1, ITEM_2]);
-    const { service, activityLog } = buildService(prisma);
+    const { service, activityLog, activities } = buildService(prisma);
     // getOutcome (called at the end) نیاز به findUnique دوباره داره — همون mock کافیه چون فقط select می‌خونه
     prisma.inquiry.findUnique.mockResolvedValue({
       id: INQUIRY_ID,
@@ -84,6 +95,33 @@ describe("OutcomeService — قوانین کسب‌وکاری", () => {
     expect(activityLog.log).toHaveBeenCalledWith(
       expect.objectContaining({ metadata: expect.objectContaining({ status: "won", mode: "won_all" }) }),
     );
+    // فاز ۵۸ — Trigger #۵: حداقل یک قلم برد → order_pending (فروش) + po_pending (تأمین)، هرکدوم Watcher اون‌یکی
+    expect(activities.closeStageActivities).toHaveBeenCalledWith(
+      INQUIRY_ID,
+      "awaiting_customer_outcome",
+      "user-1",
+    );
+    expect(activities.openStageActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ stageCode: "order_pending", assignedToUserId: "sales-1", extraWatcherUserIds: ["proc-1"] }),
+    );
+    expect(activities.openStageActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ stageCode: "po_pending", assignedToUserId: "proc-1", extraWatcherUserIds: ["sales-1"] }),
+    );
+  });
+
+  it("فاز ۵۸: cancelled mode فقط awaiting_customer_outcome رو می‌بنده — Activity جدیدی باز نمی‌کنه", async () => {
+    const prisma = buildPrisma();
+    mockInquiryWithItems(prisma, [ITEM_1, ITEM_2]);
+    const { service, activities } = buildService(prisma);
+
+    await service.saveOutcome(INQUIRY_ID, { mode: "cancelled", decisionDate: "2026-07-10" }, "user-1");
+
+    expect(activities.closeStageActivities).toHaveBeenCalledWith(
+      INQUIRY_ID,
+      "awaiting_customer_outcome",
+      "user-1",
+    );
+    expect(activities.openStageActivity).not.toHaveBeenCalled();
   });
 
   it("mixed mode with a split produces partially_won", async () => {

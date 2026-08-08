@@ -1,10 +1,12 @@
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { ActivityLogService } from "../inquiries/activity-log.service";
+import { InquiriesService } from "../inquiries/inquiries.service";
 import { SelectionService } from "../selection/selection.service";
 import { OrderService } from "./order.service";
 
 const INQUIRY_ID = "11111111-1111-1111-1111-111111111111";
+const USER_ID = "99999999-9999-9999-9999-999999999999";
 
 function buildPrisma() {
   return {
@@ -60,12 +62,14 @@ const SELECTION_STATE = {
 function buildService(prisma: ReturnType<typeof buildPrisma>) {
   const activityLog = { log: jest.fn().mockResolvedValue({}) };
   const selection = { getSelection: jest.fn().mockResolvedValue(SELECTION_STATE) };
+  const inquiries = { autoAssignFinanceOwner: jest.fn().mockResolvedValue(undefined) };
   const service = new OrderService(
     prisma as unknown as PrismaService,
     activityLog as unknown as ActivityLogService,
     selection as unknown as SelectionService,
+    inquiries as unknown as InquiriesService,
   );
-  return { service, activityLog, selection };
+  return { service, activityLog, selection, inquiries };
 }
 
 function mockInquiry(prisma: ReturnType<typeof buildPrisma>) {
@@ -210,7 +214,7 @@ describe("OrderService — پرداخت‌ها و ضمانت‌نامه‌ها",
     prisma.order.findFirst.mockResolvedValue(null);
     const { service } = buildService(prisma);
 
-    await expect(service.addPayment(INQUIRY_ID, { amount: 100 })).rejects.toBeInstanceOf(
+    await expect(service.addPayment(INQUIRY_ID, { amount: 100 }, USER_ID)).rejects.toBeInstanceOf(
       NotFoundException,
     );
   });
@@ -233,13 +237,15 @@ describe("OrderService — پرداخت‌ها و ضمانت‌نامه‌ها",
       customerPayments: [],
       issuedGuarantees: [],
     });
-    const { service } = buildService(prisma);
+    const { service, inquiries } = buildService(prisma);
 
-    await service.addPayment(INQUIRY_ID, {});
+    await service.addPayment(INQUIRY_ID, {}, USER_ID);
 
     expect(prisma.customerPayment.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ amount: 0, status: "unpaid" }) }),
     );
+    // فاز ۵۸ — اولین پرداخت مشتری هم می‌تونه اولین اقدام مالی این پرونده باشه
+    expect(inquiries.autoAssignFinanceOwner).toHaveBeenCalledWith(INQUIRY_ID, USER_ID);
   });
 
   it("allows adding a blank guarantee row (type/amount default) — UI creates blank rows and edits inline", async () => {

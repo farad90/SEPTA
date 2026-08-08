@@ -35,6 +35,10 @@ export const PERMISSION_MODULES: PermissionModuleDef[] = [
         label: "مشاهده جزئیات بازرگانی در گفتگو/لاگ فعالیت (نام تأمین‌کننده، مبالغ)",
       },
       { key: "inquiry.decline", label: "رد استعلام در مرحله اول (قبل از استعلام از تأمین‌کننده)" },
+      // فاز ۵۸ — Case Owners: واگذاری دستی مالک تأمین/مالی پرونده (مکمل inquiry.assign
+      // که فقط sales_expert_id رو تغییر می‌ده) — نگاه کنید به erp-database-design.md دامنه ۱۴
+      { key: "inquiry.assign_procurement_owner", label: "واگذاری مالک تأمین پرونده" },
+      { key: "inquiry.assign_finance_owner", label: "واگذاری مالک مالی پرونده" },
     ],
   },
   {
@@ -269,6 +273,7 @@ export const DEFAULT_GROUP_GRANTS: Record<string, string[]> = {
     "shipping.record_packaging",
     "shipping.manage_freight_rfq",
     "shipping.manage_shipment",
+    "inquiry.assign_procurement_owner",
     "partners.view_suppliers",
     "partners.create",
     "catalog.view",
@@ -287,6 +292,7 @@ export const DEFAULT_GROUP_GRANTS: Record<string, string[]> = {
     "po.manage_payments",
     "settlement.issue_invoice",
     "settlement.record_collection",
+    "inquiry.assign_finance_owner",
     "correspondence.view_own_department",
     "correspondence.create",
     "correspondence.register",

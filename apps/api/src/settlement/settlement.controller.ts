@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Put, UseGuards } from "@nestjs/common";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
+import { CurrentUser, RequestUser } from "../auth/decorators/current-user.decorator";
 import { PermissionsGuard } from "../permissions/permissions.guard";
 import { RequirePermissions } from "../permissions/require-permissions.decorator";
 import { SettlementService } from "./settlement.service";
@@ -18,8 +19,12 @@ export class SettlementController {
 
   @RequirePermissions("settlement.record_delivery")
   @Patch("inquiries/:id/delivery")
-  updateDelivery(@Param("id", ParseUUIDPipe) id: string, @Body() dto: UpdateDeliveryDto) {
-    return this.service.updateDelivery(id, dto);
+  updateDelivery(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: UpdateDeliveryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.updateDelivery(id, dto, user.userId);
   }
 
   @RequirePermissions("settlement.issue_invoice")
@@ -30,8 +35,12 @@ export class SettlementController {
 
   @RequirePermissions("settlement.issue_invoice")
   @Put("inquiries/:id/invoice")
-  upsertInvoice(@Param("id", ParseUUIDPipe) id: string, @Body() dto: UpsertInvoiceDto) {
-    return this.service.upsertInvoice(id, dto);
+  upsertInvoice(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: UpsertInvoiceDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.upsertInvoice(id, dto, user.userId);
   }
 
   @RequirePermissions("settlement.issue_invoice")

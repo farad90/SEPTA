@@ -3,6 +3,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { ActivityLogService } from "../inquiries/activity-log.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { PermissionsService } from "../permissions/permissions.service";
+import { ActivitiesService } from "../activities/activities.service";
 import {
   AddShipmentDocumentDto,
   CreateEditRequestDto,
@@ -105,6 +106,7 @@ export class ShipmentsService {
     private readonly activityLog: ActivityLogService,
     private readonly notifications: NotificationsService,
     private readonly permissions: PermissionsService,
+    private readonly activities: ActivitiesService,
   ) {}
 
   async list() {
@@ -214,6 +216,12 @@ export class ShipmentsService {
       "status_change",
       { module: "shipment", action: "stage_advanced", from: shipment.stage, to: nextStage },
     );
+
+    // فاز ۵۸ — Trigger #۷ (erp-database-design.md دامنه ۱۴): فقط وقتی این محموله به آخرین
+    // مرحله (ترخیص) می‌رسه؛ یک محموله می‌تونه چند پروندهٔ مختلف رو هم‌زمان دربر بگیره
+    if (nextStage === "cleared") {
+      await this.advanceToDeliveryPending(packageIds, currentUserId);
+    }
 
     return this.getById(id);
   }
@@ -471,6 +479,14 @@ export class ShipmentsService {
     return this.prisma.importDocument.create({ data: { shipmentId } });
   }
 
+  private async resolveInvolvedInquiryIds(packageIds: string[]): Promise<string[]> {
+    const packages = await this.prisma.package.findMany({
+      where: { id: { in: packageIds } },
+      select: { po: { select: { order: { select: { inquiryId: true } } } } },
+    });
+    return [...new Set(packages.map((p) => p.po.order.inquiryId))];
+  }
+
   private async logToInvolvedInquiries(
     packageIds: string[],
     authorId: string,
@@ -478,13 +494,45 @@ export class ShipmentsService {
     tag: Parameters<ActivityLogService["log"]>[0]["tag"],
     metadata: Record<string, unknown>,
   ) {
-    const packages = await this.prisma.package.findMany({
-      where: { id: { in: packageIds } },
-      select: { po: { select: { order: { select: { inquiryId: true } } } } },
-    });
-    const inquiryIds = [...new Set(packages.map((p) => p.po.order.inquiryId))];
+    const inquiryIds = await this.resolveInvolvedInquiryIds(packageIds);
     for (const inquiryId of inquiryIds) {
       await this.activityLog.log({ inquiryId, authorId, text, tag, metadata });
+    }
+  }
+
+  /**
+   * فاز ۵۸ — Trigger #۷: برای هر پروندهٔ درگیر این محموله، shipping_in_progress رو می‌بنده
+   * و delivery_pending رو برای Sales Owner باز می‌کنه (چون تحویل/دریافت انبار طبق طراحی
+   * موجود دامنهٔ ۶ در صفحهٔ خودِ پرونده و توسط فروش انجام می‌شه، نه ماژول سراسری بارها).
+   */
+  private async advanceToDeliveryPending(packageIds: string[], currentUserId: string) {
+    const inquiryIds = await this.resolveInvolvedInquiryIds(packageIds);
+    for (const inquiryId of inquiryIds) {
+      const alreadyOpen = await this.prisma.activity.findFirst({
+        where: {
+          relatedEntityType: "inquiry",
+          relatedEntityId: inquiryId,
+          relatedStageCode: "delivery_pending",
+          status: { notIn: ["completed", "cancelled"] },
+        },
+      });
+      if (alreadyOpen) continue;
+
+      const inquiry = await this.prisma.inquiry.findUniqueOrThrow({
+        where: { id: inquiryId },
+        select: { salesExpertId: true, procurementOwnerId: true },
+      });
+
+      await this.activities.closeStageActivities(inquiryId, "shipping_in_progress", currentUserId);
+      await this.activities.openStageActivity({
+        inquiryId,
+        stageCode: "delivery_pending",
+        activityType: "internal_task",
+        subject: "تحویل به مشتری و ثبت دریافت انبار",
+        assignedToUserId: inquiry.salesExpertId,
+        triggeredByUserId: currentUserId,
+        extraWatcherUserIds: inquiry.procurementOwnerId ? [inquiry.procurementOwnerId] : [],
+      });
     }
   }
 

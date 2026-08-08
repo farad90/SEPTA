@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { ActivityLogService } from "../inquiries/activity-log.service";
+import { ActivitiesService } from "../activities/activities.service";
 import { SaveOutcomeDto } from "./dto/outcome.dto";
 
 const MODE_LABELS: Record<string, string> = {
@@ -19,6 +20,7 @@ export class OutcomeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activityLog: ActivityLogService,
+    private readonly activities: ActivitiesService,
   ) {}
 
   async getOutcome(inquiryId: string) {
@@ -149,6 +151,45 @@ export class OutcomeService {
       metadata: { module: "outcome", action: "recorded", mode: dto.mode, status },
     });
 
+    // فاز ۵۸ — Trigger #۵ (erp-database-design.md دامنه ۱۴)
+    await this.advanceAfterOutcome(inquiryId, results.some((r) => r === "won"), currentUserId);
+
     return this.getOutcome(inquiryId);
+  }
+
+  /**
+   * awaiting_customer_outcome همیشه بسته می‌شه (نتیجه‌ای ثبت شد). اگه حداقل یک قلم برد داشته
+   * باشه (won/partially_won)، order_pending برای Sales Owner و po_pending برای Procurement
+   * Owner باز می‌شن (هرکدوم Watcher اون‌یکی، طبق تصمیم تأییدشده «Watcher مختص Trigger»)؛
+   * باخت/لغو کامل مسیر رو بدون Activity جدید پایان می‌ده.
+   */
+  private async advanceAfterOutcome(inquiryId: string, hasWonItem: boolean, currentUserId: string) {
+    await this.activities.closeStageActivities(inquiryId, "awaiting_customer_outcome", currentUserId);
+    if (!hasWonItem) return;
+
+    const inquiry = await this.prisma.inquiry.findUniqueOrThrow({
+      where: { id: inquiryId },
+      select: { salesExpertId: true, procurementOwnerId: true },
+    });
+    const procurementAssignee = inquiry.procurementOwnerId ?? currentUserId;
+
+    await this.activities.openStageActivity({
+      inquiryId,
+      stageCode: "order_pending",
+      activityType: "internal_task",
+      subject: "ثبت سفارش مشتری",
+      assignedToUserId: inquiry.salesExpertId,
+      triggeredByUserId: currentUserId,
+      extraWatcherUserIds: [procurementAssignee],
+    });
+    await this.activities.openStageActivity({
+      inquiryId,
+      stageCode: "po_pending",
+      activityType: "internal_task",
+      subject: "صدور سفارش خرید (PO)",
+      assignedToUserId: procurementAssignee,
+      triggeredByUserId: currentUserId,
+      extraWatcherUserIds: [inquiry.salesExpertId],
+    });
   }
 }

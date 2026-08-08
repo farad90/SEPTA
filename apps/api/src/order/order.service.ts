@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { ActivityLogService } from "../inquiries/activity-log.service";
+import { InquiriesService } from "../inquiries/inquiries.service";
 import { SelectionService } from "../selection/selection.service";
 import {
   SaveCustomerPaymentDto,
@@ -31,6 +32,7 @@ export class OrderService {
     private readonly prisma: PrismaService,
     private readonly activityLog: ActivityLogService,
     private readonly selection: SelectionService,
+    private readonly inquiries: InquiriesService,
   ) {}
 
   // ------------------------------------------------------------
@@ -149,7 +151,7 @@ export class OrderService {
   // ------------------------------------------------------------
 
   /** ردیف خالی هم مجازه — الگوی UI: افزودن ردیف خالی و بعد ویرایش خطی */
-  async addPayment(inquiryId: string, dto: SaveCustomerPaymentDto) {
+  async addPayment(inquiryId: string, dto: SaveCustomerPaymentDto, currentUserId: string) {
     const order = await this.getOrderByInquiryOrThrow(inquiryId);
     await this.prisma.customerPayment.create({
       data: {
@@ -162,6 +164,9 @@ export class OrderService {
         status: dto.status ?? "unpaid",
       },
     });
+    // فاز ۵۸ — اولین نوشتار مالی این پرونده (اگه هنوز فاکتوری هم صادر نشده) — Finance Owner
+    // رو در صورت خالی‌بودن پر می‌کنه؛ نگاه کنید به erp-database-design.md دامنه ۱۴
+    await this.inquiries.autoAssignFinanceOwner(inquiryId, currentUserId);
     return this.getOrder(inquiryId);
   }
 

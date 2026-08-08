@@ -6,6 +6,7 @@ import { MailService } from "../mail/mail.service";
 import { RfqNumberService } from "./rfq-number.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { ActivitiesService } from "../activities/activities.service";
+import { InquiriesService } from "../inquiries/inquiries.service";
 import { RfqsService } from "./rfqs.service";
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
@@ -20,12 +21,21 @@ function buildPrisma() {
     businessPartner: { findUnique: jest.fn() },
     ourEntity: { findUnique: jest.fn(), findMany: jest.fn() },
     inquiryItem: { count: jest.fn(), findMany: jest.fn() },
-    supplierRfq: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), create: jest.fn() },
+    // فاز ۵۸ — count پیش‌فرض ۰ می‌ده تا advanceProcurementStage در تست‌های قبلی (که به Trigger
+    // #۲ کاری ندارن) زودهنگام return بشه، بدون نیاز به mock کردن هرکدوم جداگانه
+    supplierRfq: {
+      findUnique: jest.fn(),
+      findMany: jest.fn(),
+      update: jest.fn(),
+      create: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
+    },
     supplierOffer: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
     supplierOfferItem: { deleteMany: jest.fn(), upsert: jest.fn(), findMany: jest.fn() },
     supplierOfferDocument: { create: jest.fn() },
     rfqItem: { findMany: jest.fn() },
     inquiryDiscussion: { create: jest.fn() },
+    activity: { findFirst: jest.fn().mockResolvedValue(null) },
     currency: { findUnique: jest.fn(), findMany: jest.fn() },
     $transaction: jest.fn(),
   };
@@ -40,7 +50,12 @@ function buildService(prisma: ReturnType<typeof buildPrisma>, mailConfigured = f
   };
   const config = { get: jest.fn().mockReturnValue(7) };
   const notifications = { create: jest.fn().mockResolvedValue({}), clearForEntity: jest.fn().mockResolvedValue({}) };
-  const activities = { create: jest.fn().mockResolvedValue({}) };
+  const activities = {
+    create: jest.fn().mockResolvedValue({}),
+    openStageActivity: jest.fn().mockResolvedValue({}),
+    closeStageActivities: jest.fn().mockResolvedValue(0),
+  };
+  const inquiries = { autoAssignProcurementOwner: jest.fn().mockResolvedValue(undefined) };
   const service = new RfqsService(
     prisma as unknown as PrismaService,
     numberService as unknown as RfqNumberService,
@@ -49,8 +64,9 @@ function buildService(prisma: ReturnType<typeof buildPrisma>, mailConfigured = f
     config as unknown as ConfigService,
     notifications as unknown as NotificationsService,
     activities as unknown as ActivitiesService,
+    inquiries as unknown as InquiriesService,
   );
-  return { service, numberService, activityLog, mail, notifications, activities };
+  return { service, numberService, activityLog, mail, notifications, activities, inquiries };
 }
 
 const BASE_RFQ = {
@@ -245,6 +261,71 @@ describe("RfqsService", () => {
         text: expect.stringContaining("SKF"),
         restrictedText: expect.not.stringContaining("SKF"),
       }),
+    );
+  });
+
+  it("فاز ۵۸: createOffer() وقتی آخرین RFQ به سرانجام می‌رسه، procurement_awaiting_response رو می‌بنده و pricing_pending رو با مالک تأمین باز می‌کنه", async () => {
+    const prisma = buildPrisma();
+    prisma.supplierRfq.findUnique.mockResolvedValue(BASE_RFQ);
+    prisma.inquiry.findUnique.mockResolvedValue({
+      selectionLockedAt: null,
+      salesExpertId: "sales-1",
+      procurementOwnerId: "proc-1",
+    });
+    prisma.currency.findUnique.mockResolvedValue({ currencyCode: "EUR" });
+    // فراخوانی اول (remaining) صفر → هیچ RFQ دیگه‌ای در انتظار نیست؛ فراخوانی دوم (totalRfqs) یک
+    prisma.supplierRfq.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        supplierOffer: { create: jest.fn().mockResolvedValue({ id: "offer-1" }) },
+        supplierRfq: { update: jest.fn().mockResolvedValue({}) },
+      }),
+    );
+    const { service, activities } = buildService(prisma);
+
+    await service.createOffer(
+      RFQ_ID,
+      { currencyCode: "EUR", items: [{ inquiryItemId: "item-1", price: 5 }] },
+      USER_ID,
+    );
+
+    expect(activities.closeStageActivities).toHaveBeenCalledWith(
+      INQUIRY_ID,
+      "procurement_awaiting_response",
+      USER_ID,
+    );
+    expect(activities.openStageActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inquiryId: INQUIRY_ID,
+        stageCode: "pricing_pending",
+        assignedToUserId: "proc-1",
+        extraWatcherUserIds: ["sales-1"],
+      }),
+    );
+  });
+
+  it("فاز ۵۸: createOffer() وقتی هنوز RFQ دیگه‌ای در انتظار پاسخه، pricing_pending رو باز نمی‌کنه", async () => {
+    const prisma = buildPrisma();
+    prisma.supplierRfq.findUnique.mockResolvedValue(BASE_RFQ);
+    prisma.inquiry.findUnique.mockResolvedValue({ selectionLockedAt: null });
+    prisma.currency.findUnique.mockResolvedValue({ currencyCode: "EUR" });
+    prisma.supplierRfq.count.mockResolvedValueOnce(1); // یک RFQ دیگه هنوز awaiting_response‌ست
+    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        supplierOffer: { create: jest.fn().mockResolvedValue({ id: "offer-1" }) },
+        supplierRfq: { update: jest.fn().mockResolvedValue({}) },
+      }),
+    );
+    const { service, activities } = buildService(prisma);
+
+    await service.createOffer(
+      RFQ_ID,
+      { currencyCode: "EUR", items: [{ inquiryItemId: "item-1", price: 5 }] },
+      USER_ID,
+    );
+
+    expect(activities.openStageActivity).not.toHaveBeenCalledWith(
+      expect.objectContaining({ stageCode: "pricing_pending" }),
     );
   });
 

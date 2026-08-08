@@ -1,13 +1,14 @@
 import { BadRequestException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { ActivityLogService } from "../inquiries/activity-log.service";
+import { ActivitiesService } from "../activities/activities.service";
 import { computeEffectiveUnitPrice, SelectionService } from "./selection.service";
 
 const INQUIRY_ID = "11111111-1111-1111-1111-111111111111";
 
 function buildPrisma() {
   return {
-    inquiry: { findUnique: jest.fn(), update: jest.fn() },
+    inquiry: { findUnique: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn() },
     supplierOffer: { findMany: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
     supplierOfferItem: { findFirst: jest.fn(), findUnique: jest.fn() },
     inquiryItem: { findFirst: jest.fn(), update: jest.fn() },
@@ -18,11 +19,16 @@ function buildPrisma() {
 
 function buildService(prisma: ReturnType<typeof buildPrisma>) {
   const activityLog = { log: jest.fn().mockResolvedValue({}) };
+  const activities = {
+    openStageActivity: jest.fn().mockResolvedValue({}),
+    closeStageActivities: jest.fn().mockResolvedValue(0),
+  };
   const service = new SelectionService(
     prisma as unknown as PrismaService,
     activityLog as unknown as ActivityLogService,
+    activities as unknown as ActivitiesService,
   );
-  return { service, activityLog };
+  return { service, activityLog, activities };
 }
 
 describe("computeEffectiveUnitPrice — فرمول اصلاح‌شده توزیع هزینه", () => {
@@ -220,6 +226,35 @@ describe("SelectionService — قوانین کسب‌وکاری", () => {
     const { service } = buildService(prisma);
 
     await expect(service.lock(INQUIRY_ID, undefined, "user-1")).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("فاز ۵۸: lock() موفق pricing_pending رو می‌بنده و proposal_pending رو برای Sales Owner باز می‌کنه", async () => {
+    const prisma = buildPrisma();
+    prisma.inquiry.findUnique.mockResolvedValue({
+      id: INQUIRY_ID,
+      selectionLockedAt: null,
+      deletedAt: null,
+      items: [],
+      deliveryOptions: [],
+      selectionLocker: null,
+      managerNoteToSales: null,
+      selectionBaseCurrencyCode: null,
+      selectionExchangeRates: [],
+    });
+    prisma.inquiry.findUniqueOrThrow.mockResolvedValue({ salesExpertId: "sales-1" });
+    prisma.supplierOffer.findMany.mockResolvedValue([]);
+    const { service, activities } = buildService(prisma);
+
+    await service.lock(INQUIRY_ID, undefined, "user-1");
+
+    expect(activities.closeStageActivities).toHaveBeenCalledWith(INQUIRY_ID, "pricing_pending", "user-1");
+    expect(activities.openStageActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inquiryId: INQUIRY_ID,
+        stageCode: "proposal_pending",
+        assignedToUserId: "sales-1",
+      }),
+    );
   });
 
   it("rejects unlocking a stage that isn't locked", async () => {

@@ -20,7 +20,9 @@ import { InquiriesService } from "./inquiries.service";
 import {
   AddInquiryDocumentDto,
   AddItemDocumentDto,
+  AssignFinanceOwnerDto,
   AssignInquiryDto,
+  AssignProcurementOwnerDto,
   CreateDiscussionMessageDto,
   CreateInquiryDto,
   DeclineInquiryDto,
@@ -90,6 +92,26 @@ export class InquiriesController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.service.assign(id, dto.salesExpertId, user.userId);
+  }
+
+  @RequirePermissions("inquiry.assign_procurement_owner")
+  @Patch("inquiries/:id/procurement-owner")
+  assignProcurementOwner(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: AssignProcurementOwnerDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.assignProcurementOwner(id, dto.procurementOwnerId, user.userId);
+  }
+
+  @RequirePermissions("inquiry.assign_finance_owner")
+  @Patch("inquiries/:id/finance-owner")
+  assignFinanceOwner(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: AssignFinanceOwnerDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.assignFinanceOwner(id, dto.financeOwnerId, user.userId);
   }
 
   @RequirePermissions("inquiry.decline")

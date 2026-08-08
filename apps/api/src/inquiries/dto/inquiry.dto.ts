@@ -212,6 +212,17 @@ export class AssignInquiryDto {
   salesExpertId!: string;
 }
 
+// فاز ۵۸ — مکمل AssignInquiryDto برای دو Case Owner دیگه (نگاه کنید به erp-database-design.md دامنه ۱۴)
+export class AssignProcurementOwnerDto {
+  @IsUUID()
+  procurementOwnerId!: string;
+}
+
+export class AssignFinanceOwnerDto {
+  @IsUUID()
+  financeOwnerId!: string;
+}
+
 export class DeclineInquiryDto {
   @IsOptional()
   @IsString()
@@ -269,9 +280,12 @@ export class ListInquiriesQueryDto {
   @IsUUID()
   salesExpertId?: string;
 
+  // فاز ۵۸ — "action": مرتب‌سازی عملیاتی بر مبنای آخرین Activity باز مرتبط (نگاه کنید
+  // به erp-database-design.md دامنه ۱۴): فوری/عقب‌افتاده اول، بعد نزدیک‌ترین سررسید،
+  // بعد اولویت، بعد آخرین به‌روزرسانی
   @IsOptional()
-  @IsIn(["deadline", "createdAt"])
-  sortBy?: "deadline" | "createdAt";
+  @IsIn(["deadline", "createdAt", "action"])
+  sortBy?: "deadline" | "createdAt" | "action";
 
   @IsOptional()
   @IsIn(["asc", "desc"])

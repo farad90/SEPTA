@@ -24,18 +24,27 @@ export const CHANNEL_LABEL: Record<string, string> = {
   tender_system: "سامانه مناقصه",
 };
 
+export type ActionPriority = "low" | "normal" | "high" | "urgent";
+
 export interface InquiryListRow {
   id: string;
   internalNumber: string;
   inquiryNumber: string | null;
   subject: string;
   status: InquiryStatus;
-  /** فقط وقتی status=in_progress پر می‌شه — مرحله‌ی فعلی پرونده در ۹ مرحله‌ی فرآیند */
+  /**
+   * مرحله‌ی فعلی پرونده. فاز ۵۸ — وقتی یک Activity سیستمی باز مرتبط با این پرونده باشه
+   * (نگاه کنید به erp-database-design.md دامنه ۱۴)، همون مرحله (با جزئیات بیشتر از ۳ حالت
+   * قبلی) نشون داده می‌شه؛ حتی برای پرونده‌های won/partially_won که هنوز کار باز دارن
+   * (مثلاً «در انتظار صدور سفارش خرید»). برای پرونده‌های بدون Activity باز، طبق قاعده‌ی
+   * قبلی فقط برای status=in_progress پر می‌شه.
+   */
   stageLabel: string | null;
   offerEndDate: string;
   extendedOfferEndDate: string | null;
   urgency: "normal" | "urgent" | null;
   createdAt: string;
+  updatedAt: string;
   buyer: { id: string; companyName: string };
   salesExpert: { id: string; fullName: string };
   _count: { items: number };
@@ -43,6 +52,15 @@ export interface InquiryListRow {
   builders: string[];
   /** ارزش کل پرونده به قیمت فروش نهایی (final_sale_price × مقدار)، به تفکیک ارز — بدون تبدیل نرخ */
   saleValueByCurrency: Record<string, number>;
+
+  // فاز ۵۸ — وضعیت عملیاتی مشتق از آخرین Activity باز مرتبط با این پرونده (فقط در لیست؛
+  // GET /inquiries/:id این فیلدها رو برنمی‌گردونه — نگاه کنید به InquiryDetail پایین‌تر)
+  /** متن «چه کاری الان لازمه» — null یعنی هیچ Activity باز سیستمی برای این پرونده نیست */
+  actionRequired: string | null;
+  actionAssignee: { id: string; fullName: string } | null;
+  actionDueAt: string | null;
+  actionOverdue: boolean;
+  actionPriority: ActionPriority | null;
 }
 
 export interface InquiryItemDocument {
@@ -69,7 +87,20 @@ export interface InquiryItem {
   documents: InquiryItemDocument[];
 }
 
-export interface InquiryDetail extends Omit<InquiryListRow, "_count" | "builders" | "saleValueByCurrency"> {
+// فاز ۵۸ — GET /inquiries/:id این ۵ فیلد وضعیت عملیاتی رو برنمی‌گردونه (فقط لیست پر می‌شه)؛
+// عمداً از InquiryDetail حذف شدن تا نوع منعکس‌کنندهٔ داده‌ی واقعی بمونه
+export interface InquiryDetail
+  extends Omit<
+    InquiryListRow,
+    | "_count"
+    | "builders"
+    | "saleValueByCurrency"
+    | "actionRequired"
+    | "actionAssignee"
+    | "actionDueAt"
+    | "actionOverdue"
+    | "actionPriority"
+  > {
   isEquivalentAccepted: boolean | null;
   settlementTerms: string | null;
   advancePaymentAvailable: boolean | null;

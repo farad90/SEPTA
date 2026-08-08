@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, NotFoundException } from "@nest
 import { PrismaService } from "../prisma/prisma.service";
 import { ActivityLogService } from "../inquiries/activity-log.service";
 import { SelectionService } from "../selection/selection.service";
+import { ActivitiesService } from "../activities/activities.service";
 import { PoService } from "./po.service";
 
 const INQUIRY_ID = "11111111-1111-1111-1111-111111111111";
@@ -10,12 +11,23 @@ const SUPPLIER_2 = "33333333-3333-3333-3333-333333333333";
 
 function buildPrisma() {
   return {
-    inquiry: { findUnique: jest.fn() },
+    inquiry: { findUnique: jest.fn(), findUniqueOrThrow: jest.fn().mockResolvedValue({ procurementOwnerId: "proc-1", salesExpertId: "sales-1" }) },
     order: { findFirst: jest.fn() },
-    purchaseOrder: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
+    // فاز ۵۸ — advanceAfterAllPosIssued (Trigger #۶): پیش‌فرض «یک تأمین‌کننده متمایز، صفر PO صادرشده»
+    // یعنی posIssued(0) < distinctSuppliers.length(1) همیشه true‌ست و Trigger زودهنگام return می‌کنه؛
+    // تست‌های اختصاصی این Trigger این دو مقدار رو صریح override می‌کنن
+    orderItem: { findMany: jest.fn().mockResolvedValue([{ supplierId: "placeholder" }]) },
+    purchaseOrder: {
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
+    },
     poItem: { findMany: jest.fn(), deleteMany: jest.fn(), createMany: jest.fn() },
     supplierPayment: { create: jest.fn(), update: jest.fn(), delete: jest.fn(), findUnique: jest.fn() },
     supplierRfq: { findFirst: jest.fn() },
+    activity: { findFirst: jest.fn().mockResolvedValue(null) },
   };
 }
 
@@ -57,12 +69,17 @@ const ORDER_ROW = { id: "order-1", orderNumber: "ORD-2026-0001", items: [ORDER_I
 function buildService(prisma: ReturnType<typeof buildPrisma>) {
   const activityLog = { log: jest.fn().mockResolvedValue({}) };
   const selection = { getSelection: jest.fn().mockResolvedValue(SELECTION_STATE) };
+  const activities = {
+    openStageActivity: jest.fn().mockResolvedValue({}),
+    closeStageActivities: jest.fn().mockResolvedValue(0),
+  };
   const service = new PoService(
     prisma as unknown as PrismaService,
     activityLog as unknown as ActivityLogService,
     selection as unknown as SelectionService,
+    activities as unknown as ActivitiesService,
   );
-  return { service, activityLog, selection };
+  return { service, activityLog, selection, activities };
 }
 
 function mockBase(prisma: ReturnType<typeof buildPrisma>) {
@@ -120,6 +137,73 @@ describe("PoService — ساخت PO", () => {
     expect(activityLog.log).toHaveBeenCalledWith(
       expect.objectContaining({ metadata: expect.objectContaining({ action: "created", supplierId: SUPPLIER_1 }) }),
     );
+  });
+
+  it("فاز ۵۸: صدور آخرین PO باقی‌مانده po_pending رو می‌بنده و shipping_in_progress رو با مالک تأمین باز می‌کنه", async () => {
+    const prisma = buildPrisma();
+    mockBase(prisma);
+    prisma.purchaseOrder.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ id: "po-1", supplierId: SUPPLIER_1 });
+    prisma.supplierRfq.findFirst.mockResolvedValue({ ourEntityId: "entity-1" });
+    prisma.poItem.findMany.mockResolvedValue([]);
+    prisma.purchaseOrder.findUnique.mockResolvedValue({
+      id: "po-1",
+      poNumber: "PO-2026-0001-SCH",
+      ourEntityId: "entity-1",
+      ourEntity: { id: "entity-1", entityName: "General Trading srl", shortCode: "GT" },
+      currencyCode: "EUR",
+      totalAmount: 100,
+      issueDate: new Date(),
+      deliveryDueDate: null,
+      items: [],
+      supplierPayments: [],
+    });
+    // دو تأمین‌کننده متمایز در سفارش، و همین الان دومین (آخرین) PO صادر شد
+    prisma.orderItem.findMany.mockResolvedValue([{ supplierId: SUPPLIER_1 }, { supplierId: SUPPLIER_2 }]);
+    prisma.purchaseOrder.count.mockResolvedValue(2);
+    const { service, activities } = buildService(prisma);
+
+    await service.savePo(INQUIRY_ID, SUPPLIER_1, {}, "user-1");
+
+    expect(activities.closeStageActivities).toHaveBeenCalledWith(INQUIRY_ID, "po_pending", "user-1");
+    expect(activities.openStageActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inquiryId: INQUIRY_ID,
+        stageCode: "shipping_in_progress",
+        assignedToUserId: "proc-1",
+        extraWatcherUserIds: ["sales-1"],
+      }),
+    );
+  });
+
+  it("فاز ۵۸: صدور PO وقتی تأمین‌کننده دیگه‌ای هنوز PO نداره، shipping_in_progress رو باز نمی‌کنه", async () => {
+    const prisma = buildPrisma();
+    mockBase(prisma);
+    prisma.purchaseOrder.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ id: "po-1", supplierId: SUPPLIER_1 });
+    prisma.supplierRfq.findFirst.mockResolvedValue({ ourEntityId: "entity-1" });
+    prisma.poItem.findMany.mockResolvedValue([]);
+    prisma.purchaseOrder.findUnique.mockResolvedValue({
+      id: "po-1",
+      poNumber: "PO-2026-0001-SCH",
+      ourEntityId: "entity-1",
+      ourEntity: { id: "entity-1", entityName: "General Trading srl", shortCode: "GT" },
+      currencyCode: "EUR",
+      totalAmount: 100,
+      issueDate: new Date(),
+      deliveryDueDate: null,
+      items: [],
+      supplierPayments: [],
+    });
+    prisma.orderItem.findMany.mockResolvedValue([{ supplierId: SUPPLIER_1 }, { supplierId: SUPPLIER_2 }]);
+    prisma.purchaseOrder.count.mockResolvedValue(1); // فقط همین یکی صادر شده، دومی هنوز نه
+    const { service, activities } = buildService(prisma);
+
+    await service.savePo(INQUIRY_ID, SUPPLIER_1, {}, "user-1");
+
+    expect(activities.openStageActivity).not.toHaveBeenCalled();
   });
 
   it("rejects a duplicate PO number with ConflictException", async () => {

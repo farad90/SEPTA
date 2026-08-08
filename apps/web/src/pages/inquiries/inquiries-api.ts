@@ -15,7 +15,8 @@ export interface InquiryListFilters {
   status?: string;
   buyerId?: string;
   salesExpertId?: string;
-  sortBy?: "deadline" | "createdAt";
+  // فاز ۵۸ — "action": مرتب‌سازی عملیاتی سمت سرور (نگاه کنید به erp-database-design.md دامنه ۱۴)
+  sortBy?: "deadline" | "createdAt" | "action";
   sortDir?: "asc" | "desc";
 }
 
@@ -24,7 +25,9 @@ export function useInquiries(filters: InquiryListFilters) {
     queryKey: [...KEY, filters],
     queryFn: async () => {
       const { data } = await apiClient.get<Paged<InquiryListRow>>("/inquiries", {
-        // pageSize بزرگ چون مرتب‌سازی/فیلتر ستون‌ها (فاز ۵۳) سمت کلاینت روی کل لیست انجام می‌شه
+        // pageSize بزرگ چون مرتب‌سازی/فیلتر ستون‌ها (فاز ۵۳) سمت کلاینت روی کل لیست انجام می‌شه.
+        // sortBy اینجا صرفاً تعیین می‌کنه سرور کدوم زیرمجموعه رو (در صورت عبور از سقف داخلی
+        // سرور) بفرسته؛ ترتیب واقعی نمایش همچنان با مرتب‌سازی کلاینت (کلیک روی هدر ستون‌ها) تعیین می‌شه.
         params: { ...filters, q: filters.q || undefined, pageSize: 1000 },
       });
       return data;

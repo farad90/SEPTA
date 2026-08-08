@@ -49,9 +49,11 @@ model User {
   createdPermissionGroups PermissionGroup[] @relation("PermissionGroupCreatedBy")
   refreshTokens           RefreshToken[]
 
-  inquiriesAsSalesExpert Inquiry[]             @relation("InquirySalesExpert")
-  inquiriesCreated       Inquiry[]             @relation("InquiryCreatedBy")
-  inquiriesLocked        Inquiry[]             @relation("InquirySelectionLockedBy")
+  inquiriesAsSalesExpert       Inquiry[]             @relation("InquirySalesExpert")
+  inquiriesCreated             Inquiry[]             @relation("InquiryCreatedBy")
+  inquiriesLocked              Inquiry[]             @relation("InquirySelectionLockedBy")
+  inquiriesAsProcurementOwner  Inquiry[]             @relation("InquiryProcurementOwner")
+  inquiriesAsFinanceOwner      Inquiry[]             @relation("InquiryFinanceOwner")
   discussionsAuthored    InquiryDiscussion[]   @relation("DiscussionAuthor")
   discussionsMentioned   InquiryDiscussion[]   @relation("DiscussionMentioned")
   uploadedItemDocuments  InquiryItemDocument[] @relation("ItemDocumentUploadedBy")
@@ -279,6 +281,11 @@ model Inquiry {
   managerNoteToSales       String?   @map("manager_note_to_sales")
   selectionLockedAt        DateTime? @map("selection_locked_at") @db.Timestamptz
   selectionLockedBy        String?   @map("selection_locked_by") @db.Uuid
+  // فاز ۵۸ — Case Owners (SEPTA Inquiry Workflow & Ownership Architecture v1.0):
+  // مکمل salesExpertId؛ صرفاً پیش‌فرض تخصیص Activity/نمایش، هرگز supplierRfq.commercialExpertId
+  // رو محدود/override نمی‌کنن — نگاه کنید به erp-database-design.md دامنه ۱۴
+  procurementOwnerId       String?   @map("procurement_owner_id") @db.Uuid
+  financeOwnerId           String?   @map("finance_owner_id") @db.Uuid
   // فاز ۵۷ — ارز مبنای مرحله «انتخاب نهایی و قیمت‌گذاری»؛ وقتی پر باشه، قیمت فروش نهایی
   // هر قلم بر همین ارز محاسبه می‌شه (نگاه کنید به inquiry_selection_exchange_rates)
   selectionBaseCurrencyCode String?  @map("selection_base_currency_code") @db.VarChar(3)
@@ -292,6 +299,8 @@ model Inquiry {
   salesExpert      User                @relation("InquirySalesExpert", fields: [salesExpertId], references: [id])
   createdBy        User                @relation("InquiryCreatedBy", fields: [createdByUserId], references: [id])
   selectionLocker  User?               @relation("InquirySelectionLockedBy", fields: [selectionLockedBy], references: [id])
+  procurementOwner User?               @relation("InquiryProcurementOwner", fields: [procurementOwnerId], references: [id])
+  financeOwner     User?               @relation("InquiryFinanceOwner", fields: [financeOwnerId], references: [id])
   selectionBaseCurrency Currency?      @relation(fields: [selectionBaseCurrencyCode], references: [currencyCode])
   items            InquiryItem[]
   documents        InquiryDocument[]
@@ -1986,6 +1995,9 @@ model Activity {
   description            String?
   relatedEntityType      String?   @map("related_entity_type") @db.VarChar(30)
   relatedEntityId        String?   @map("related_entity_id") @db.Uuid
+  // فاز ۵۸ — تگ مرحلهٔ سیستمی چرخهٔ استعلام (procurement_awaiting_response، pricing_pending، ...)؛
+  // فقط برای Activity‌های خودکار ۹ Trigger پر می‌شه، برای فعالیت‌های دستی/عمومی همیشه NULL می‌مونه.
+  relatedStageCode       String?   @map("related_stage_code") @db.VarChar(30)
   priority               String    @default("normal") @db.VarChar(20)
   status                 String    @default("open") @db.VarChar(20)
   scheduledAt            DateTime? @map("scheduled_at") @db.Timestamptz

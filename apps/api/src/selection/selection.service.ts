@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { ActivityLogService } from "../inquiries/activity-log.service";
+import { ActivitiesService } from "../activities/activities.service";
 import {
   DeliveryOptionDto,
   SaveSelectionDto,
@@ -53,6 +54,7 @@ export class SelectionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activityLog: ActivityLogService,
+    private readonly activities: ActivitiesService,
   ) {}
 
   // ------------------------------------------------------------
@@ -472,6 +474,22 @@ export class SelectionService {
       text: "مرحله «انتخاب نهایی و قیمت‌گذاری» تأیید و قفل شد — تولید پیشنهاد مالی/فنی حالا مجازه",
       tag: "approval",
       metadata: { module: "selection", action: "locked" },
+    });
+
+    // فاز ۵۸ — Trigger #۳ (erp-database-design.md دامنه ۱۴): بستن pricing_pending،
+    // باز کردن proposal_pending برای Sales Owner
+    const { salesExpertId } = await this.prisma.inquiry.findUniqueOrThrow({
+      where: { id: inquiryId },
+      select: { salesExpertId: true },
+    });
+    await this.activities.closeStageActivities(inquiryId, "pricing_pending", currentUserId);
+    await this.activities.openStageActivity({
+      inquiryId,
+      stageCode: "proposal_pending",
+      activityType: "internal_task",
+      subject: "تهیه و ارسال پیشنهاد به مشتری",
+      assignedToUserId: salesExpertId,
+      triggeredByUserId: currentUserId,
     });
 
     return { ...(await this.getSelection(inquiryId)), warnings: noOfferRows.length > 0 ? [`ردیف(های) ${noOfferRows.join("، ")} بدون آفر قیمت موندن`] : [] };

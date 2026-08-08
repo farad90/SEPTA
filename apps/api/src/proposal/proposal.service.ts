@@ -3,6 +3,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { ActivityLogService } from "../inquiries/activity-log.service";
 import { SelectionService } from "../selection/selection.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { ActivitiesService } from "../activities/activities.service";
 import { ProposalNumberService } from "./proposal-number.service";
 import { SaveFinancialProposalDto, SaveTechnicalProposalDto } from "./dto/proposal.dto";
 
@@ -48,6 +49,7 @@ export class ProposalService {
     private readonly selection: SelectionService,
     private readonly notifications: NotificationsService,
     private readonly proposalNumber: ProposalNumberService,
+    private readonly activities: ActivitiesService,
   ) {}
 
   // ------------------------------------------------------------
@@ -431,6 +433,7 @@ export class ProposalService {
       tag: "stage_completed",
       metadata: { module: "proposal", action: "financial_sent", version: current.version },
     });
+    await this.advanceToAwaitingCustomerOutcome(inquiryId, currentUserId);
     return this.getProposal(inquiryId);
   }
 
@@ -598,6 +601,7 @@ export class ProposalService {
       tag: "stage_completed",
       metadata: { module: "proposal", action: "technical_sent", version: current.version },
     });
+    await this.advanceToAwaitingCustomerOutcome(inquiryId, currentUserId);
     return this.getProposal(inquiryId);
   }
 
@@ -814,6 +818,40 @@ export class ProposalService {
       throw new BadRequestException("ابتدا باید مرحله «انتخاب نهایی» توسط مدیریت قفل بشه");
     }
     return inquiry;
+  }
+
+  /**
+   * فاز ۵۸ — Trigger #۴ (erp-database-design.md دامنه ۱۴). مالی و فنی دو Entity مستقل‌ان
+   * که هرکدوم جدا ارسال می‌شن؛ اولین ارسال (هرکدوم زودتر باشه) proposal_pending رو می‌بنده
+   * و awaiting_customer_outcome رو باز می‌کنه — چک alreadyOpen مانع باز شدن دوباره با ارسال
+   * دومی می‌شه.
+   */
+  private async advanceToAwaitingCustomerOutcome(inquiryId: string, currentUserId: string) {
+    const alreadyOpen = await this.prisma.activity.findFirst({
+      where: {
+        relatedEntityType: "inquiry",
+        relatedEntityId: inquiryId,
+        relatedStageCode: "awaiting_customer_outcome",
+        status: { notIn: ["completed", "cancelled"] },
+      },
+    });
+    if (alreadyOpen) return;
+
+    const inquiry = await this.prisma.inquiry.findUniqueOrThrow({
+      where: { id: inquiryId },
+      select: { salesExpertId: true, offerEndDate: true, extendedOfferEndDate: true },
+    });
+
+    await this.activities.closeStageActivities(inquiryId, "proposal_pending", currentUserId);
+    await this.activities.openStageActivity({
+      inquiryId,
+      stageCode: "awaiting_customer_outcome",
+      activityType: "follow_up",
+      subject: "پیگیری پاسخ مشتری به پیشنهاد ارسالی",
+      assignedToUserId: inquiry.salesExpertId,
+      triggeredByUserId: currentUserId,
+      dueAt: inquiry.extendedOfferEndDate ?? inquiry.offerEndDate,
+    });
   }
 
   private async getCurrentFinancialOrThrow(inquiryId: string) {
