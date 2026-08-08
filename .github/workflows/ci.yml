@@ -101,6 +101,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # GHCR/OCI image names must be lowercase, but github.repository preserves
+      # the repo's actual casing ("farad90/SEPTA") -- using it directly in a
+      # tag fails with "repository name must be lowercase".
+      - name: Compute lowercase image repository name
+        run: echo "IMAGE_REPO=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -113,8 +119,8 @@ jobs:
           build-args: |
             GIT_COMMIT_SHA=${{ github.sha }}
           tags: |
-            ghcr.io/${{ github.repository }}/api:${{ github.sha }}
-            ghcr.io/${{ github.repository }}/api:latest
+            ghcr.io/${{ env.IMAGE_REPO }}/api:${{ github.sha }}
+            ghcr.io/${{ env.IMAGE_REPO }}/api:latest
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
 
@@ -127,7 +133,7 @@ jobs:
           build-args: |
             GIT_COMMIT_SHA=${{ github.sha }}
           tags: |
-            ghcr.io/${{ github.repository }}/web:${{ github.sha }}
-            ghcr.io/${{ github.repository }}/web:latest
+            ghcr.io/${{ env.IMAGE_REPO }}/web:${{ github.sha }}
+            ghcr.io/${{ env.IMAGE_REPO }}/web:latest
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
