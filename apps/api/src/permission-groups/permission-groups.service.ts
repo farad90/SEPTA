@@ -10,7 +10,7 @@ import {
   BROAD_NARROW_FAMILIES,
   DEPENDENT_PERMISSION_KEYS,
   SOD_SENSITIVE_PAIRS,
-} from "../../prisma/permission-catalog";
+} from "../permissions/permission-catalog";
 
 @Injectable()
 export class PermissionGroupsService {

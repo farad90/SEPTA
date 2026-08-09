@@ -4,7 +4,7 @@ import {
   DEFAULT_GROUP_GRANTS,
   PERMISSION_MODULES,
   RETIRED_PERMISSION_KEYS,
-} from "./permission-catalog";
+} from "../src/permissions/permission-catalog";
 
 const prisma = new PrismaClient();
 

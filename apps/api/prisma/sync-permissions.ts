@@ -11,7 +11,11 @@
 // این اسکریپت idempotent و کاملاً افزودنیه به جز یک استثنای عمدی (revokeStalePartnersView،
 // یک‌بارمصرف طبق طراحی فاز ۵۱) — امن برای اجرا در هر deploy، حتی وقتی چیزی عوض نشده.
 import { PrismaClient } from "../generated/prisma";
-import { DEFAULT_GROUP_GRANTS, PERMISSION_MODULES, RETIRED_PERMISSION_KEYS } from "./permission-catalog";
+import {
+  DEFAULT_GROUP_GRANTS,
+  PERMISSION_MODULES,
+  RETIRED_PERMISSION_KEYS,
+} from "../src/permissions/permission-catalog";
 
 const prisma = new PrismaClient();
 
