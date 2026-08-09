@@ -133,6 +133,31 @@ function PriorityBadge({ priority }: { priority: ActionPriority | null }) {
   return <span className={`inline-block text-[10.5px] px-2 py-0.5 rounded-lg font-medium ${meta.className}`}>{meta.label}</span>;
 }
 
+// همون الگوی fmt در OrderTab/POTab/ProposalTab/RfqTab/SelectionTab/SettlementTab
+const fmtAmount = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+
+/** فهرست «مبلغ ارز» به ازای هر ارز موجود — قبل از قفل شدن قیمت‌گذاری نهایی همیشه خالیه */
+function saleValueEntries(row: InquiryListRow): { currency: string; amount: number }[] {
+  return Object.entries(row.saleValueByCurrency)
+    .filter(([, amount]) => amount > 0)
+    .map(([currency, amount]) => ({ currency, amount }));
+}
+
+/** ستون «ارزش استعلام» — فقط بعد از قفل شدن قیمت‌گذاری نهایی (انتخاب نهایی) مقدار می‌گیره */
+function SaleValueCell({ row }: { row: InquiryListRow }) {
+  const entries = saleValueEntries(row);
+  if (entries.length === 0) return <span className="text-xs text-textSecondary">—</span>;
+  return (
+    <div className="text-xs text-textPrimary" dir="ltr">
+      {entries.map(({ currency, amount }) => (
+        <span key={currency} className="block whitespace-nowrap text-left">
+          {fmtAmount(amount)} {currency}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // ------------------------------------------------------------
 // تعریف ستون‌های قابل مرتب‌سازی/فیلتر — هر ستون یک مقدار مرتب‌سازی (عدد/رشته/تاریخ) و
 // یک فهرست «گزینه‌های موجود در این سلول» (برای فیلتر چندانتخابی مثل AutoFilter اکسل)
@@ -146,6 +171,7 @@ type ColumnKey =
   | "buyer"
   | "action"
   | "status"
+  | "saleValue"
   | "assignee"
   | "deadline"
   | "priority"
@@ -157,21 +183,37 @@ const COLUMN_LABEL: Record<ColumnKey, string> = {
   buyer: "مشتری",
   action: "نیاز به اقدام",
   status: "مرحله",
+  saleValue: "ارزش استعلام",
   assignee: "مسئول فعلی",
   deadline: "سررسید",
   priority: "اولویت",
   createdAt: "ثبت",
 };
 
-// فاز ۵۸ — itemCount/brands/saleValue (کم‌کاربردترین ستون‌ها برای تصمیم عملیاتی «چه کاری
-// الان لازمه») از نمای پیش‌فرض لیست حذف شدن تا ستون‌های اقدام/مسئول/سررسید/اولویت جا باز کنن؛
-// این داده‌ها همچنان در صفحه جزئیات پرونده در دسترسن.
+// عرض ثابت هر ستون — "action" عمداً بدون کلاس می‌مونه تا باقی‌ماندهٔ فضا رو بگیره (بیشترین اولویت نمایشی)
+const COLUMN_WIDTH_CLASS: Partial<Record<ColumnKey, string>> = {
+  internalNumber: "w-[120px]",
+  subject: "w-[170px]",
+  buyer: "w-[110px]",
+  status: "w-[110px]",
+  saleValue: "w-[110px]",
+  assignee: "w-[100px]",
+  deadline: "w-[110px]",
+  priority: "w-[75px]",
+  createdAt: "w-[90px]",
+};
+
+// فاز ۵۸ — itemCount/brands (کم‌کاربردترین ستون‌ها برای تصمیم عملیاتی «چه کاری الان لازمه»)
+// از نمای پیش‌فرض لیست حذف شدن تا ستون‌های اقدام/مسئول/سررسید/اولویت جا باز کنن؛ این داده‌ها
+// همچنان در صفحه جزئیات پرونده در دسترسن. فاز ۵۹ — «ارزش استعلام» طبق درخواست کاربر برگشت
+// (بعد از قفل قیمت‌گذاری نهایی مقدار می‌گیره — قبلش خودِ داده هنوز خالیه، نیازی به شرط جدا نیست).
 const ALL_COLUMNS: ColumnKey[] = [
   "internalNumber",
   "subject",
   "buyer",
   "action",
   "status",
+  "saleValue",
   "assignee",
   "deadline",
   "priority",
@@ -192,6 +234,10 @@ function sortValue(row: InquiryListRow, key: ColumnKey): string | number {
       return row.actionRequired ?? "";
     case "status":
       return INQUIRY_STATUS_META[row.status].label;
+    case "saleValue":
+      // چندارزی دقیق قابل جمع‌زدن نیست؛ برای مرتب‌سازی صرفاً مجموع خام همه ارزها کافیه
+      // (اکثر پرونده‌ها تک‌ارزن) — دقت واحدی مثل ستون «اولویت» که خودش هم یک تقریبه
+      return Object.values(row.saleValueByCurrency).reduce((sum, v) => sum + v, 0);
     case "assignee":
       return row.actionAssignee?.fullName ?? row.salesExpert.fullName;
     case "deadline":
@@ -216,6 +262,12 @@ function columnOptions(row: InquiryListRow, key: ColumnKey): string[] {
       return [row.actionRequired ?? "(بدون اقدام باز)"];
     case "status":
       return [INQUIRY_STATUS_META[row.status].label];
+    case "saleValue": {
+      const entries = saleValueEntries(row);
+      return entries.length > 0
+        ? entries.map(({ currency, amount }) => `${fmtAmount(amount)} ${currency}`)
+        : ["(بدون قیمت‌گذاری نهایی)"];
+    }
     case "assignee":
       return [row.actionAssignee?.fullName ?? row.salesExpert.fullName];
     case "deadline":
@@ -477,6 +529,7 @@ function emptyColFilters(): Record<ColumnKey, Set<string> | null> {
     buyer: null,
     action: null,
     status: null,
+    saleValue: null,
     assignee: null,
     deadline: null,
     priority: null,
@@ -635,23 +688,7 @@ export function InquiriesListPage() {
                   <th
                     key={key}
                     className={`sticky top-0 z-10 bg-surface border-b border-border px-3 py-2.5 align-bottom ${
-                      key === "internalNumber"
-                        ? "w-[120px]"
-                        : key === "subject"
-                          ? "w-[170px]"
-                          : key === "buyer"
-                            ? "w-[110px]"
-                            : key === "status"
-                              ? "w-[110px]"
-                              : key === "assignee"
-                                ? "w-[100px]"
-                                : key === "deadline"
-                                  ? "w-[110px]"
-                                  : key === "priority"
-                                    ? "w-[75px]"
-                                    : key === "createdAt"
-                                      ? "w-[90px]"
-                                      : "" /* action: باقی‌ماندهٔ فضا، بیشترین اولویت نمایشی */
+                      COLUMN_WIDTH_CLASS[key] ?? ""
                     }`}
                   >
                     <div className="flex items-center justify-between gap-1">
@@ -725,6 +762,9 @@ export function InquiriesListPage() {
                     )}
                     {visibleColumns.has("status") && (
                       <td className="px-3 py-2"><StatusBadge status={row.status} stageLabel={row.stageLabel} /></td>
+                    )}
+                    {visibleColumns.has("saleValue") && (
+                      <td className="px-3 py-2"><SaleValueCell row={row} /></td>
                     )}
                     {visibleColumns.has("assignee") && (
                       <td className="px-3 py-2 text-xs text-textSecondary">
