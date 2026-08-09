@@ -276,7 +276,10 @@ export function AppShell() {
           onToggleWorkPanel={() => setWorkPanelOpen((open) => !open)}
         />
         <main className="flex-1 overflow-y-auto p-4 sm:p-8">
-          <div className="max-w-6xl w-full mx-auto">
+          {/* فاز ۵۹ — صفحاتی که جدول‌های داده‌ی عریض دارن (مثل لیست استعلام‌ها) از سقف
+              max-w-6xl خارج می‌شن تا روی مانیتورهای بزرگ کل عرض صفحه رو پوشش بدن؛ بقیه‌ی
+              صفحات (فرم‌ها/جزئیات) همون عرض قابل‌خواندن قبلی رو حفظ می‌کنن. */}
+          <div className={location.pathname === "/inquiries" ? "w-full" : "max-w-6xl w-full mx-auto"}>
             <Outlet />
           </div>
         </main>

@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  Columns3,
   Download,
   FileSearch,
   Filter,
@@ -384,6 +385,91 @@ function ColumnFilterMenu({
   );
 }
 
+// فاز ۵۹ — نمایش/عدم‌نمایش هر ستون، خصوصی برای هر کاربر. دقیقاً هم‌الگوی تنظیمات ظاهری
+// شخصی (پالت/دارک‌مود، erp-database-design.md دامنه ۱) — کاملاً سمت فرانت، بدون دیتابیس/ستون
+// جدید، فقط localStorage. اگه مقدار ذخیره‌شده خراب/خالی باشه، پیش‌فرض همه‌ی ستون‌ها نمایشیه.
+const VISIBLE_COLUMNS_STORAGE_KEY = "septa:inquiries-list:visible-columns";
+
+function loadVisibleColumns(): Set<ColumnKey> {
+  try {
+    const raw = localStorage.getItem(VISIBLE_COLUMNS_STORAGE_KEY);
+    if (!raw) return new Set(ALL_COLUMNS);
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set(ALL_COLUMNS);
+    const valid = parsed.filter((k): k is ColumnKey => (ALL_COLUMNS as string[]).includes(k as string));
+    return valid.length > 0 ? new Set(valid) : new Set(ALL_COLUMNS);
+  } catch {
+    return new Set(ALL_COLUMNS);
+  }
+}
+
+// دراپ‌داون خصوصی‌سازی ستون‌ها — چک‌باکس به‌ازای هر ستون؛ همیشه حداقل یک ستون باید فعال بمونه
+function ColumnVisibilityMenu({
+  visible,
+  onChange,
+}: {
+  visible: Set<ColumnKey>;
+  onChange: (next: Set<ColumnKey>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  function toggle(key: ColumnKey) {
+    const next = new Set(visible);
+    if (next.has(key)) {
+      if (next.size === 1) return; // حداقل یک ستون باید باقی بمونه
+      next.delete(key);
+    } else {
+      next.add(key);
+    }
+    onChange(next);
+  }
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center gap-1.5 text-xs px-3.5 py-2.5 rounded-lg border transition-all duration-150 ${
+          open
+            ? "text-primary border-primary/40 bg-accentSoft"
+            : "text-textSecondary border-border hover:text-textPrimary hover:border-textSecondary/40 hover:bg-bg"
+        }`}
+      >
+        <Columns3 size={13} /> ستون‌ها
+      </button>
+      {open && (
+        <div className="absolute z-20 top-full mt-1 left-0 w-52 rounded-lg border border-border bg-surface shadow-lg p-2 space-y-0.5">
+          {ALL_COLUMNS.map((key) => (
+            <label
+              key={key}
+              className="flex items-center gap-1.5 text-[11px] text-textPrimary px-1.5 py-1.5 rounded hover:bg-bg cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                checked={visible.has(key)}
+                onChange={() => toggle(key)}
+                className="shrink-0"
+              />
+              {COLUMN_LABEL[key]}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function emptyColFilters(): Record<ColumnKey, Set<string> | null> {
   return {
     internalNumber: null,
@@ -411,6 +497,13 @@ export function InquiriesListPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [colFilters, setColFilters] = useState<Record<ColumnKey, Set<string> | null>>(emptyColFilters());
   const [exporting, setExporting] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(loadVisibleColumns);
+
+  useEffect(() => {
+    localStorage.setItem(VISIBLE_COLUMNS_STORAGE_KEY, JSON.stringify([...visibleColumns]));
+  }, [visibleColumns]);
+
+  const displayColumns = useMemo(() => ALL_COLUMNS.filter((k) => visibleColumns.has(k)), [visibleColumns]);
 
   // دیبانس کوتاه — نتیجه عملاً با هر حرف تایپ/حذف‌شده به‌روز می‌شه، بدون شلیک یک درخواست به‌ازای هر keystroke
   const debouncedQuery = useDebounced(query, 200);
@@ -467,6 +560,7 @@ export function InquiriesListPage() {
           )}
         </p>
         <div className="flex gap-2">
+          <ColumnVisibilityMenu visible={visibleColumns} onChange={setVisibleColumns} />
           {hasActiveColFilters && (
             <button
               onClick={() => setColFilters(emptyColFilters())}
@@ -533,14 +627,14 @@ export function InquiriesListPage() {
       )}
 
       {!isLoading && !isError && (
-        <div className="rounded-xl bg-surface border border-border shadow-card overflow-x-auto">
+        <div className="rounded-xl bg-surface border border-border shadow-card overflow-auto max-h-[75vh]">
           <table className="w-full text-right table-fixed min-w-[1250px]">
             <thead>
-              <tr className="border-b border-border bg-bg/60">
-                {ALL_COLUMNS.map((key) => (
+              <tr>
+                {displayColumns.map((key) => (
                   <th
                     key={key}
-                    className={`px-3 py-2.5 align-bottom ${
+                    className={`sticky top-0 z-10 bg-surface border-b border-border px-3 py-2.5 align-bottom ${
                       key === "internalNumber"
                         ? "w-[120px]"
                         : key === "subject"
@@ -577,7 +671,7 @@ export function InquiriesListPage() {
             <tbody className="divide-y divide-border">
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="p-14 text-center">
+                  <td colSpan={displayColumns.length} className="p-14 text-center">
                     <div className="w-12 h-12 rounded-full bg-bg flex items-center justify-center mx-auto mb-3">
                       <FileSearch size={20} className="text-textSecondary" />
                     </div>
@@ -597,42 +691,60 @@ export function InquiriesListPage() {
                       row.actionOverdue ? "bg-[#F3E6E4]/50 hover:bg-[#F3E6E4]/70" : "hover:bg-bg"
                     }`}
                   >
-                    <td className="px-3 py-2">
-                      <span className="flex items-center gap-1 min-w-0">
-                        {row.actionOverdue && <AlertTriangle size={11} className="text-danger shrink-0" />}
-                        <span className="block truncate text-xs font-mono text-primary font-medium" dir="ltr" title={row.internalNumber}>
-                          {row.internalNumber}
+                    {visibleColumns.has("internalNumber") && (
+                      <td className="px-3 py-2">
+                        <span className="flex items-center gap-1 min-w-0">
+                          {row.actionOverdue && <AlertTriangle size={11} className="text-danger shrink-0" />}
+                          <span className="block truncate text-xs font-mono text-primary font-medium" dir="ltr" title={row.internalNumber}>
+                            {row.internalNumber}
+                          </span>
                         </span>
-                      </span>
-                      {row.inquiryNumber && (
-                        <span className="block truncate text-[10px] text-textSecondary font-mono" dir="ltr" title={row.inquiryNumber}>
-                          {row.inquiryNumber}
+                        {row.inquiryNumber && (
+                          <span className="block truncate text-[10px] text-textSecondary font-mono" dir="ltr" title={row.inquiryNumber}>
+                            {row.inquiryNumber}
+                          </span>
+                        )}
+                      </td>
+                    )}
+                    {visibleColumns.has("subject") && (
+                      <td className="px-3 py-2 text-xs text-textPrimary">
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          {row.urgency === "urgent" && <Flame size={12} className="text-danger shrink-0" />}
+                          <span className="truncate min-w-0" title={row.subject}>{row.subject}</span>
                         </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-textPrimary">
-                      <span className="flex items-center gap-1.5 min-w-0">
-                        {row.urgency === "urgent" && <Flame size={12} className="text-danger shrink-0" />}
-                        <span className="truncate min-w-0" title={row.subject}>{row.subject}</span>
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-xs text-textPrimary">
-                      <span className="block truncate" title={row.buyer.companyName}>{row.buyer.companyName}</span>
-                    </td>
+                      </td>
+                    )}
+                    {visibleColumns.has("buyer") && (
+                      <td className="px-3 py-2 text-xs text-textPrimary">
+                        <span className="block truncate" title={row.buyer.companyName}>{row.buyer.companyName}</span>
+                      </td>
+                    )}
                     {/* فاز ۵۸ — «نیاز به اقدام»: عمداً پررنگ‌تر از نشان مرحله، طبق الزام UX */}
-                    <td className="px-3 py-2"><ActionCell row={row} /></td>
-                    <td className="px-3 py-2"><StatusBadge status={row.status} stageLabel={row.stageLabel} /></td>
-                    <td className="px-3 py-2 text-xs text-textSecondary">
-                      <span
-                        className="block truncate"
-                        title={row.actionAssignee?.fullName ?? row.salesExpert.fullName}
-                      >
-                        {row.actionAssignee?.fullName ?? row.salesExpert.fullName}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2"><DueCell row={row} /></td>
-                    <td className="px-3 py-2"><PriorityBadge priority={row.actionPriority} /></td>
-                    <td className="px-3 py-2 text-xs text-textSecondary whitespace-nowrap">{formatJalali(row.createdAt)}</td>
+                    {visibleColumns.has("action") && (
+                      <td className="px-3 py-2"><ActionCell row={row} /></td>
+                    )}
+                    {visibleColumns.has("status") && (
+                      <td className="px-3 py-2"><StatusBadge status={row.status} stageLabel={row.stageLabel} /></td>
+                    )}
+                    {visibleColumns.has("assignee") && (
+                      <td className="px-3 py-2 text-xs text-textSecondary">
+                        <span
+                          className="block truncate"
+                          title={row.actionAssignee?.fullName ?? row.salesExpert.fullName}
+                        >
+                          {row.actionAssignee?.fullName ?? row.salesExpert.fullName}
+                        </span>
+                      </td>
+                    )}
+                    {visibleColumns.has("deadline") && (
+                      <td className="px-3 py-2"><DueCell row={row} /></td>
+                    )}
+                    {visibleColumns.has("priority") && (
+                      <td className="px-3 py-2"><PriorityBadge priority={row.actionPriority} /></td>
+                    )}
+                    {visibleColumns.has("createdAt") && (
+                      <td className="px-3 py-2 text-xs text-textSecondary whitespace-nowrap">{formatJalali(row.createdAt)}</td>
+                    )}
                   </tr>
                 );
               })}
