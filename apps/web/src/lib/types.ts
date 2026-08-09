@@ -98,6 +98,8 @@ export interface PermissionGroupSummary {
   isDefault: boolean;
   memberCount: number;
   permissionKeys: string[];
+  /** فقط در پاسخ create/update — هشدار جفت‌های حساس SoD که هم‌زمان تیک خوردن (ذخیره مسدود نمی‌شه) */
+  warnings?: string[];
 }
 
 export interface PermissionCatalogModule {

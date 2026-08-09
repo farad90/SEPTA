@@ -6,6 +6,11 @@ import {
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateGroupDto, UpdateGroupDto } from "./dto/group.dto";
+import {
+  BROAD_NARROW_FAMILIES,
+  DEPENDENT_PERMISSION_KEYS,
+  SOD_SENSITIVE_PAIRS,
+} from "../../prisma/permission-catalog";
 
 @Injectable()
 export class PermissionGroupsService {
@@ -53,7 +58,8 @@ export class PermissionGroupsService {
       throw new BadRequestException("گروهی با این نام قبلاً ساخته شده");
     }
 
-    const permissions = await this.resolveKeys(dto.permissionKeys);
+    const { keys: normalizedKeys, warnings } = this.normalizeAndValidateKeys(dto.permissionKeys);
+    const permissions = await this.resolveKeys(normalizedKeys);
 
     const group = await this.prisma.permissionGroup.create({
       data: {
@@ -66,7 +72,7 @@ export class PermissionGroupsService {
       },
     });
 
-    return this.getById(group.id);
+    return { ...(await this.getById(group.id)), warnings };
   }
 
   async getById(id: string) {
@@ -119,8 +125,11 @@ export class PermissionGroupsService {
       });
     }
 
+    let warnings: string[] = [];
     if (dto.permissionKeys) {
-      const permissions = await this.resolveKeys(dto.permissionKeys);
+      const normalized = this.normalizeAndValidateKeys(dto.permissionKeys);
+      warnings = normalized.warnings;
+      const permissions = await this.resolveKeys(normalized.keys);
       await this.prisma.$transaction([
         this.prisma.permissionGroupItem.deleteMany({ where: { permissionGroupId: id } }),
         this.prisma.permissionGroupItem.createMany({
@@ -132,7 +141,7 @@ export class PermissionGroupsService {
       ]);
     }
 
-    return this.getById(id);
+    return { ...(await this.getById(id)), warnings };
   }
 
   /** حذف فقط برای گروه غیرپیش‌فرضِ بدون عضو */
@@ -163,6 +172,40 @@ export class PermissionGroupsService {
 
     await this.prisma.permissionGroup.delete({ where: { id } });
     return { success: true };
+  }
+
+  /**
+   * فاز ۵۸ — سه نوع تداخل شناسایی‌شده در ممیزی کامل کاتالوگ رو قبل از ذخیره اعمال می‌کنه:
+   * ۱) خانواده‌ی «گسترده جایگزین محدود» (مثل partners.view در برابر view_customers/
+   *    view_suppliers): وقتی broad حاضره، narrow های همون خانواده به‌صورت خاموش از ست حذف
+   *    می‌شن (نه خطا — چون broad قبلاً قابلیتشون رو داره، این فقط پاک‌سازی چک‌باکس گمراه‌کننده‌ست)
+   * ۲) دسترسی وابسته بدون پایه‌ش (مثل inquiry.view_all بدون inquiry.view): خطای صریح، چون
+   *    اضافه‌کردن خاموش دسترسی پایه می‌تونه یک قابلیت ناخواسته به گروه بده
+   * ۳) جفت‌های حساس SoD (مثل proposal.edit_price + proposal.approve_price_reduction): این‌ها
+   *    Business Decision هستن نه خطای فنی — فقط به‌عنوان warning برمی‌گردن، ذخیره مسدود نمی‌شه
+   */
+  private normalizeAndValidateKeys(inputKeys: string[]): { keys: string[]; warnings: string[] } {
+    const keys = new Set(inputKeys);
+
+    for (const { broad, narrow } of BROAD_NARROW_FAMILIES) {
+      if (keys.has(broad)) {
+        narrow.forEach((key) => keys.delete(key));
+      }
+    }
+
+    for (const { key, requires } of DEPENDENT_PERMISSION_KEYS) {
+      if (keys.has(key) && !keys.has(requires)) {
+        throw new BadRequestException(
+          `دسترسی «${key}» بدون دسترسی پایه «${requires}» هیچ اثری نداره — اول «${requires}» رو هم تیک بزنید`,
+        );
+      }
+    }
+
+    const warnings = SOD_SENSITIVE_PAIRS.filter(
+      ({ pair }) => keys.has(pair[0]) && keys.has(pair[1]),
+    ).map(({ message }) => message);
+
+    return { keys: [...keys], warnings };
   }
 
   private async resolveKeys(keys: string[]) {

@@ -336,3 +336,56 @@ export const RETIRED_PERMISSION_KEYS = [
   "users.approve",
   "users.assign_permission_group",
 ];
+
+// فاز ۵۸ (ادامهٔ حادثهٔ production ۲۰۲۶-۰۸-۰۹) — بعد از بررسی کامل کاتالوگ + دیتای واقعی
+// Production، سه نوع تداخل شناسایی شد. این سه ثابت فقط «قانون» رو تعریف می‌کنن؛ اعمال واقعی
+// در PermissionGroupsService انجام می‌شه (نگاه کنید به normalizeAndValidateKeys آنجا).
+
+/**
+ * خانواده‌های «دسترسی گسترده جایگزین چند دسترسی محدود» — مثال کاربر: partners.view (همه
+ * شرکت‌ها) در برابر partners.view_customers/partners.view_suppliers. کد مصرف‌کننده
+ * (BusinessPartnersService) از قبل broad رو برنده می‌دونه؛ اینجا فقط جلوی ذخیره‌ی هم‌زمان یک
+ * چک‌باکس گسترده و چک‌باکس‌های محدودِ همون خانواده گرفته می‌شه — broad ذخیره می‌شه، narrow های
+ * زائد به‌صورت خودکار از ست ذخیره‌شده حذف می‌شن (بدون خطا؛ چون broad قبلاً همون قابلیت رو داره).
+ */
+export const BROAD_NARROW_FAMILIES: { broad: string; narrow: string[] }[] = [
+  { broad: "partners.view", narrow: ["partners.view_customers", "partners.view_suppliers"] },
+];
+
+/**
+ * دسترسی‌های «توسعه‌یافته» که بدون دسترسی پایه‌شون در Controller هیچ اثری ندارن (۴۰۳ می‌خورن)
+ * — مثلاً inquiry.view_all بدون inquiry.view. اگه کلید توسعه‌یافته در ست ارسالی باشه ولی پایه‌ش
+ * نباشه، ذخیره با خطا رد می‌شه (نه auto-imply، چون اضافه‌کردن خاموشِ یک دسترسی دیگه می‌تونه
+ * غافلگیرکننده باشه — همون فلسفه‌ی خطای صریح resolveKeys برای کلید ناشناخته).
+ */
+export const DEPENDENT_PERMISSION_KEYS: { key: string; requires: string }[] = [
+  { key: "inquiry.view_all", requires: "inquiry.view" },
+  { key: "hr.view_all", requires: "hr.view" },
+  { key: "hr.manage", requires: "hr.view" },
+  { key: "correspondence.view_all", requires: "correspondence.view_own_department" },
+];
+
+/**
+ * جفت‌های حساس از نظر تفکیک وظایف (Segregation of Duties) — وقتی هر دو کلید یک جفت هم‌زمان در
+ * یک گروه باشن، همون فرد هم «درخواست‌دهنده» هم «تأییدکننده» می‌شه (مثلاً بازرگانی که هم
+ * proposal.edit_price هم proposal.approve_price_reduction داره می‌تونه تخفیف خودش رو خودش تأیید
+ * کنه). این‌ها Business Decision هستن، نه خطای فنی — پس فقط هشدار (warnings در پاسخ create/update)
+ * برمی‌گردن، ذخیره مسدود نمی‌شه؛ چون گروه «بازرگانی» در Production عمداً همین ترکیب رو داره.
+ */
+export const SOD_SENSITIVE_PAIRS: { pair: [string, string]; message: string }[] = [
+  {
+    pair: ["proposal.edit_price", "proposal.approve_price_reduction"],
+    message:
+      "این گروه هم می‌تونه قیمت پیشنهاد رو کاهش بده هم همون کاهش رو تأیید کنه — تأیید مدیریتی فاز ۳۵-ج عملاً دور زده می‌شه.",
+  },
+  {
+    pair: ["shipping.manage_shipment", "shipping.approve_edit"],
+    message:
+      "این گروه هم می‌تونه درخواست اصلاح مرحلهٔ قفل‌شدهٔ محموله بده هم همون درخواست رو تأیید کنه — گردش تأیید فاز ۲۷ عملاً دور زده می‌شه.",
+  },
+  {
+    pair: ["payroll_engine.review", "payroll_engine.approve"],
+    message:
+      "این گروه هم می‌تونه نتیجهٔ محاسبهٔ حقوق رو بازبینی کنه هم همون نتیجه رو تأیید نهایی کنه — تفکیک بازبین/تأییدکننده در گردش حقوق عملاً دور زده می‌شه.",
+  },
+];

@@ -117,3 +117,87 @@ describe("PermissionGroupsService — قوانین ایمنی", () => {
     await expect(service.getById(GROUP_ID)).rejects.toBeInstanceOf(NotFoundException);
   });
 });
+
+describe("PermissionGroupsService — تداخل دسترسی‌ها (فاز ۵۸)", () => {
+  function permissionRow(key: string) {
+    return { id: `id-${key}`, permissionKey: key };
+  }
+
+  it("وقتی partners.view (گسترده) حاضره، partners.view_suppliers محدود رو خاموش از ست ذخیره‌شده حذف می‌کنه", async () => {
+    const prisma = buildPrisma();
+    prisma.permissionGroup.findFirst.mockResolvedValue(null);
+    prisma.permission.findMany.mockImplementation(async ({ where }: { where: { permissionKey: { in: string[] } } }) =>
+      where.permissionKey.in.map(permissionRow),
+    );
+    prisma.permissionGroup.create.mockResolvedValue({ id: GROUP_ID });
+    prisma.permissionGroup.findUnique.mockResolvedValue({
+      id: GROUP_ID,
+      groupName: "گروه جدید",
+      isDefault: false,
+      items: [{ permission: permissionRow("partners.view") }],
+      _count: { users: 0 },
+    });
+    const service = new PermissionGroupsService(prisma as unknown as PrismaService);
+
+    await service.create(
+      { groupName: "گروه جدید", permissionKeys: ["partners.view", "partners.view_suppliers"] },
+      ADMIN_ID,
+    );
+
+    const savedKeys = prisma.permission.findMany.mock.calls[0][0].where.permissionKey.in;
+    expect(savedKeys).toContain("partners.view");
+    expect(savedKeys).not.toContain("partners.view_suppliers");
+  });
+
+  it("inquiry.view_all بدون inquiry.view رو رد می‌کنه", async () => {
+    const prisma = buildPrisma();
+    prisma.permissionGroup.findFirst.mockResolvedValue(null);
+    const service = new PermissionGroupsService(prisma as unknown as PrismaService);
+
+    await expect(
+      service.create({ groupName: "گروه جدید", permissionKeys: ["inquiry.view_all"] }, ADMIN_ID),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("جفت proposal.edit_price + proposal.approve_price_reduction رو ذخیره می‌کنه ولی warning برمی‌گردونه", async () => {
+    const prisma = buildPrisma();
+    prisma.permissionGroup.findUnique.mockResolvedValue({
+      id: GROUP_ID,
+      isDefault: true,
+      groupName: "بازرگانی",
+    });
+    prisma.user.findUnique.mockResolvedValue({ permissionGroupId: "other-group" });
+    prisma.permission.findMany.mockImplementation(async ({ where }: { where: { permissionKey: { in: string[] } } }) =>
+      where.permissionKey.in.map(permissionRow),
+    );
+    prisma.$transaction.mockResolvedValue(undefined);
+    prisma.permissionGroup.findUnique.mockResolvedValueOnce({
+      id: GROUP_ID,
+      isDefault: true,
+      groupName: "بازرگانی",
+    });
+    // getById() query بعد از update
+    const itemsAfterSave = ["proposal.edit_price", "proposal.approve_price_reduction"].map((key) => ({
+      permission: permissionRow(key),
+    }));
+    prisma.permissionGroup.findUnique.mockResolvedValueOnce({
+      id: GROUP_ID,
+      groupName: "بازرگانی",
+      isDefault: true,
+      items: itemsAfterSave,
+      _count: { users: 3 },
+    });
+    const service = new PermissionGroupsService(prisma as unknown as PrismaService);
+
+    const result = await service.update(
+      GROUP_ID,
+      { permissionKeys: ["proposal.edit_price", "proposal.approve_price_reduction"] },
+      ADMIN_ID,
+    );
+
+    expect(result.warnings).toHaveLength(1);
+    expect(result.permissionKeys).toEqual(
+      expect.arrayContaining(["proposal.edit_price", "proposal.approve_price_reduction"]),
+    );
+  });
+});

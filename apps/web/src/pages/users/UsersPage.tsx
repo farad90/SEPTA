@@ -382,6 +382,7 @@ function GroupDetail({
   const [keys, setKeys] = useState<Set<string>>(new Set(group.permissionKeys));
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   function toggle(key: string) {
     setKeys((current) => {
@@ -432,6 +433,15 @@ function GroupDetail({
           </p>
         )}
         {error && <p className="text-xs text-danger">{error}</p>}
+        {warnings.length > 0 && (
+          <div className="rounded-lg p-3 bg-warningSoft text-warning space-y-1">
+            {warnings.map((w) => (
+              <p key={w} className="text-xs">
+                ⚠️ {w}
+              </p>
+            ))}
+          </div>
+        )}
 
         <div className="space-y-4">
           {(catalog ?? []).map((moduleGroup) => (
@@ -470,12 +480,17 @@ function GroupDetail({
               onClick={async () => {
                 try {
                   setError(null);
-                  await update.mutateAsync({
+                  setWarnings([]);
+                  const saved = await update.mutateAsync({
                     id: group.id,
                     groupName: group.isDefault ? undefined : name.trim(),
                     permissionKeys: [...keys],
                   });
-                  onBack();
+                  if (saved.warnings && saved.warnings.length > 0) {
+                    setWarnings(saved.warnings);
+                  } else {
+                    onBack();
+                  }
                 } catch (err) {
                   setError(extractApiError(err, "خطا در ذخیره گروه"));
                 }
