@@ -62,6 +62,27 @@ services:
       postgres:
         condition: service_healthy
 
+  # فاز ۵۸ (حادثهٔ production ۲۰۲۶-۰۸-۰۹) — کاتالوگ دسترسی‌ها هم مثل migrate باید بخشی از
+  # گراف دیپلوی باشه: بدون این، هر permission key تازه‌اضافه‌شده به کد تا اجرای دستی seed
+  # در دیتابیس واقعی ظاهر نمی‌شه — دقیقاً همون باگی که باعث شد یک کاربر مدیریت فقط پروندهٔ
+  # خودش رو ببینه (inquiry.view_all هیچ‌وقت seed نشده بود). فقط بخش امن/افزودنی رو اجرا
+  # می‌کنه (نه seed.ts کامل که upsertPayroll1405 پیکربندی واقعی حقوق رو بازنویسی می‌کنه).
+  sync-permissions:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: septa_sync_permissions
+    restart: "no"
+    env_file:
+      - apps/api/.env.production
+    environment:
+      DATABASE_URL: postgresql://septa:${POSTGRES_PASSWORD}@postgres:5432/septa?schema=public
+    working_dir: /app/apps/api
+    entrypoint: ["npx", "ts-node", "prisma/sync-permissions.ts"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   api:
     build:
       context: .
@@ -86,6 +107,8 @@ services:
       # اگه migrate شکست بخوره (خطای Migration)، api اصلاً بالا نمیاد — به‌جای اینکه
       # با اسکیمای قدیمی روی داده جدید اجرا بشه و خطای ناشناخته بده
       migrate:
+        condition: service_completed_successfully
+      sync-permissions:
         condition: service_completed_successfully
     # P1-E2-F1-T1 — curl/wget aren't installed in this image (only
     # ca-certificates/fonts-liberation/chromium are, for Puppeteer), so the
