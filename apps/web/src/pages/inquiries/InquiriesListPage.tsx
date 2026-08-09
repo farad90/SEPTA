@@ -279,22 +279,27 @@ const COLUMN_LABEL: Record<ColumnKey, string> = {
   createdAt: "ثبت",
 };
 
-// عرض ثابت هر ستون — "action" عمداً بدون کلاس می‌مونه تا باقی‌ماندهٔ فضا رو بگیره (بیشترین اولویت نمایشی)
-const COLUMN_WIDTH_CLASS: Partial<Record<ColumnKey, string>> = {
-  internalNumber: "w-[120px]",
-  subject: "w-[170px]",
-  buyer: "w-[110px]",
-  status: "w-[110px]",
-  saleValue: "w-[110px]",
-  poNumber: "w-[110px]",
-  purchasePrice: "w-[110px]",
-  profitPercent: "w-[90px]",
-  profitAmount: "w-[110px]",
-  assignee: "w-[100px]",
-  deadline: "w-[110px]",
-  priority: "w-[75px]",
-  createdAt: "w-[90px]",
+// عرض کمینه هر ستون به پیکسل — "action" عمداً در این جدول نیست (کمینه‌ی خودش رو از
+// ACTION_COLUMN_MIN_WIDTH می‌گیره) چون فضای باقی‌مانده رو می‌گیره، بیشترین اولویت نمایشی.
+// این عددها هم روی <th> (width/minWidth) و هم برای محاسبه‌ی عرض کمینه‌ی کل جدول استفاده
+// می‌شن — طبق درخواست کاربر: هیچ ستونی نباید از این مقدار باریک‌تر بشه؛ اگه جمع عرض
+// ستون‌های نمایشی از فضای در دسترس بیشتر شد، به‌جای فشرده‌شدن ستون‌ها، جدول اسکرول افقی می‌گیره.
+const COLUMN_MIN_WIDTH_PX: Partial<Record<ColumnKey, number>> = {
+  internalNumber: 120,
+  subject: 170,
+  buyer: 110,
+  status: 110,
+  saleValue: 110,
+  poNumber: 110,
+  purchasePrice: 110,
+  profitPercent: 90,
+  profitAmount: 110,
+  assignee: 100,
+  deadline: 110,
+  priority: 75,
+  createdAt: 90,
 };
+const ACTION_COLUMN_MIN_WIDTH = 220;
 
 // فاز ۵۸ — itemCount/brands (کم‌کاربردترین ستون‌ها برای تصمیم عملیاتی «چه کاری الان لازمه»)
 // از نمای پیش‌فرض لیست حذف شدن تا ستون‌های اقدام/مسئول/سررسید/اولویت جا باز کنن؛ این داده‌ها
@@ -734,6 +739,15 @@ export function InquiriesListPage() {
     [availableColumns, visibleColumns],
   );
 
+  // عرض کمینه‌ی کل جدول = مجموع عرض کمینه‌ی ستون‌های نمایشی — تضمین می‌کنه هیچ ستونی زیر
+  // COLUMN_MIN_WIDTH_PX خودش فشرده نشه؛ اگه این عدد از فضای کانتینر بیشتر شد، overflow-auto
+  // روی کانتینر (پایین‌تر) به‌جای فشرده‌شدن ستون‌ها، اسکرول افقی نشون می‌ده
+  const tableMinWidth = useMemo(
+    () =>
+      displayColumns.reduce((sum, key) => sum + (COLUMN_MIN_WIDTH_PX[key] ?? ACTION_COLUMN_MIN_WIDTH), 0),
+    [displayColumns],
+  );
+
   // دیبانس کوتاه — نتیجه عملاً با هر حرف تایپ/حذف‌شده به‌روز می‌شه، بدون شلیک یک درخواست به‌ازای هر keystroke
   const debouncedQuery = useDebounced(query, 200);
   // فاز ۵۸ — sortBy=action مبنای واکشی سرور (سقف امنیتی ۲۰۰۰ ردیف مرتب‌شده)؛ ترتیب واقعی
@@ -859,29 +873,31 @@ export function InquiriesListPage() {
 
       {!isLoading && !isError && (
         <div className="rounded-xl bg-surface border border-border shadow-card overflow-auto max-h-[75vh]">
-          <table className="w-full text-right table-fixed min-w-[1250px]">
+          <table className="w-full text-right table-fixed" style={{ minWidth: tableMinWidth }}>
             <thead>
               <tr>
-                {displayColumns.map((key) => (
-                  <th
-                    key={key}
-                    className={`sticky top-0 z-10 bg-surface border-b border-border px-3 py-2.5 align-bottom ${
-                      COLUMN_WIDTH_CLASS[key] ?? ""
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-1">
-                      <SortHeader label={COLUMN_LABEL[key]} active={sortKey === key} dir={sortDir} onClick={() => toggleSort(key)} />
-                      <ColumnFilterMenu
-                        columnKey={key}
-                        sourceRows={sourceRows}
-                        colFilters={colFilters}
-                        filterValue={colFilters[key]}
-                        onChange={(next) => setColFilter(key, next)}
-                        availableColumns={availableColumns}
-                      />
-                    </div>
-                  </th>
-                ))}
+                {displayColumns.map((key) => {
+                  const minWidth = COLUMN_MIN_WIDTH_PX[key] ?? ACTION_COLUMN_MIN_WIDTH;
+                  return (
+                    <th
+                      key={key}
+                      className="sticky top-0 z-10 bg-surface border-b border-border px-3 py-2.5 align-bottom"
+                      style={{ width: minWidth, minWidth }}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <SortHeader label={COLUMN_LABEL[key]} active={sortKey === key} dir={sortDir} onClick={() => toggleSort(key)} />
+                        <ColumnFilterMenu
+                          columnKey={key}
+                          sourceRows={sourceRows}
+                          colFilters={colFilters}
+                          filterValue={colFilters[key]}
+                          onChange={(next) => setColFilter(key, next)}
+                          availableColumns={availableColumns}
+                        />
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
