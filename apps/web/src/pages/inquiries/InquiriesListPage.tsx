@@ -222,6 +222,8 @@ function ProfitAmountCell({ row }: { row: InquiryListRow }) {
 }
 
 /** درصد سود — طبق الزام کاربر، ارزی که خرید صفر/نامعلوم داره (percent=null) به‌جای عدد حدسی «—» نشون می‌ده */
+// درصد واحد ارزی نداره (بر خلاف بقیه ستون‌های مالی) — حتی وقتی چند ارز هم‌زمان سود دارن،
+// فقط عدد درصد نشون داده می‌شه، بدون برچسب ارز کنارش
 function ProfitPercentCell({ row }: { row: InquiryListRow }) {
   const entries = profitEntries(row).filter((e) => e.percent !== null);
   if (entries.length === 0) return <span className="text-xs text-textSecondary">—</span>;
@@ -232,7 +234,7 @@ function ProfitPercentCell({ row }: { row: InquiryListRow }) {
           key={currency}
           className={`block whitespace-nowrap text-left font-medium ${(percent as number) < 0 ? "text-danger" : "text-textPrimary"}`}
         >
-          {fmtAmount(percent as number)}% {currency}
+          {fmtAmount(percent as number)}%
         </span>
       ))}
     </div>
@@ -416,7 +418,7 @@ function columnOptions(row: InquiryListRow, key: ColumnKey): string[] {
     case "profitPercent": {
       const entries = profitEntries(row).filter((e) => e.percent !== null);
       return entries.length > 0
-        ? entries.map(({ currency, percent }) => `${fmtAmount(percent as number)}% ${currency}`)
+        ? entries.map(({ percent }) => `${fmtAmount(percent as number)}%`)
         : ["(نامعلوم)"];
     }
     case "profitAmount": {
@@ -792,8 +794,14 @@ export function InquiriesListPage() {
   }, [sourceRows, colFilters, sortKey, sortDir, availableColumns]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+    // فاز ۵۹-ب — h-full + flex-col به‌جای فقط space-y-4: تا این تغییر، ارتفاع جدول با یک
+    // max-h-[75vh] ثابت تعیین می‌شد که به ارتفاع واقعی باقی‌مانده‌ی صفحه (بعد از نوار جستجو/
+    // دکمه‌ها) بی‌ربط بود — روی صفحات با محتوای بیشتر بالای جدول، لبه‌ی پایین جدول (جایی که
+    // اسکرول‌بار افقی نشسته) از دید خارج می‌شد و کاربر برای رسیدن بهش باید اول کل main رو
+    // اسکرول عمودی می‌کرد. الان جدول با flex-1 min-h-0 دقیقاً فضای باقی‌مانده رو پر می‌کنه —
+    // main (در AppShell) دیگه هیچ‌وقت نیاز به اسکرول خودش نداره، فقط خودِ جدول اسکرول می‌شه.
+    <div className="flex flex-col h-full space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap shrink-0">
         <p className="text-xs text-textSecondary">
           {data ? (
             <>
@@ -844,7 +852,7 @@ export function InquiriesListPage() {
         </div>
       </div>
 
-      <div className="p-3.5 rounded-xl bg-surface border border-border shadow-card">
+      <div className="p-3.5 rounded-xl bg-surface border border-border shadow-card shrink-0">
         <div className="relative">
           <Search size={15} className="absolute top-1/2 -translate-y-1/2 right-3 text-textSecondary" />
           <TextInput
@@ -872,7 +880,7 @@ export function InquiriesListPage() {
       )}
 
       {!isLoading && !isError && (
-        <div className="rounded-xl bg-surface border border-border shadow-card overflow-auto max-h-[75vh]">
+        <div className="rounded-xl bg-surface border border-border shadow-card overflow-auto flex-1 min-h-0">
           <table className="w-full text-right table-fixed" style={{ minWidth: tableMinWidth }}>
             <thead>
               <tr>

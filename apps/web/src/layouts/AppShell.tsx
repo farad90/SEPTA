@@ -278,8 +278,17 @@ export function AppShell() {
         <main className="flex-1 overflow-y-auto p-4 sm:p-8">
           {/* فاز ۵۹ — صفحاتی که جدول‌های داده‌ی عریض دارن (مثل لیست استعلام‌ها) از سقف
               max-w-6xl خارج می‌شن تا روی مانیتورهای بزرگ کل عرض صفحه رو پوشش بدن؛ بقیه‌ی
-              صفحات (فرم‌ها/جزئیات) همون عرض قابل‌خواندن قبلی رو حفظ می‌کنن. */}
-          <div className={location.pathname === "/inquiries" ? "w-full" : "max-w-6xl w-full mx-auto"}>
+              صفحات (فرم‌ها/جزئیات) همون عرض قابل‌خواندن قبلی رو حفظ می‌کنن.
+              فاز ۵۹-ب — /inquiries علاوه بر عرض کامل، ارتفاع کامل (h-full) هم می‌گیره، چون
+              خودِ صفحه (InquiriesListPage) با flex-1/min-h-0 داخلی می‌خواد دقیقاً فضای باقی‌مانده‌ی
+              main رو پر کنه (نه اینکه main خودش اسکرول بخوره) — این wrapper بدون h-full هیچ
+              ارتفاع معینی نداشت، پس h-full داخل صفحه به‌جایی زنجیر نمی‌شد. فقط همین یک مسیر
+              رو تغییر می‌ده؛ بقیه‌ی صفحات (که به auto-height/mx-auto نیاز دارن) دست‌نخورده می‌مونن. */}
+          <div
+            className={
+              location.pathname === "/inquiries" ? "w-full h-full" : "max-w-6xl w-full mx-auto"
+            }
+          >
             <Outlet />
           </div>
         </main>
