@@ -34,7 +34,17 @@ const LIST_INCLUDE = {
       builder: true,
       quantity: true,
       finalSalePrice: true,
-      selectedOfferItem: { select: { currencyCode: true } },
+      // فاز ۵۹ — price هم اضافه شد (قبلاً فقط currencyCode) تا «قیمت خرید»/«سود تقریبی»
+      // بدون Join جدا به order_items، از همون آفر منتخبی که ارزش استعلام رو هم می‌سازه محاسبه بشه
+      selectedOfferItem: { select: { currencyCode: true, price: true } },
+    },
+  },
+  // فاز ۵۹ — فقط برای ستون «شماره PO»؛ قیمت خرید/سود عمداً از اینجا نمیان (نگاه کنید به یادداشت
+  // بالای computePurchaseValueByCurrency) چون order_items هیچ ستون ارزی نداره و می‌تونه چند
+  // تأمین‌کننده/ارز مختلف داشته باشه — جمع خام بدون تفکیک ارز اشتباهه
+  orders: {
+    select: {
+      purchaseOrders: { select: { poNumber: true } },
     },
   },
 } satisfies Prisma.InquiryInclude;
@@ -59,6 +69,17 @@ const STAGE_CODE_LABEL: Record<string, string> = {
 // مطابق فیلتر تا همین سقف کامل خونده و در سطح اپلیکیشن مرتب/صفحه‌بندی می‌شن (نگاه کنید به
 // listByActionOrder). فراتر از این سقف، پرونده‌های اضافه در این حالت مرتب‌سازی دیده نمی‌شن.
 const ACTION_SORT_SAFETY_LIMIT = 2000;
+
+/**
+ * فاز ۵۹ — سه دسترسی حساس ستون‌های لیست استعلام‌ها (شماره PO/قیمت خرید/سود تقریبی)، یک‌بار
+ * در list() محاسبه و به toListRow پاس داده می‌شه. هر سه مستقل از هم‌ان (کاربر می‌تونه هرکدوم
+ * رو بدون بقیه داشته باشه) — نگاه کنید به erp-database-design.md برای دلیل این استقلال.
+ */
+type RowVisibility = {
+  canViewPo: boolean;
+  canViewPurchasePrice: boolean;
+  canViewProfit: boolean;
+};
 
 type ActionActivity = {
   relatedEntityId: string | null;
@@ -100,6 +121,54 @@ function computeSaleValueByCurrency(items: ListRowItem[] | undefined): Record<st
     totals[currency] = (totals[currency] ?? 0) + Number(item.finalSalePrice) * Number(item.quantity);
   }
   return totals;
+}
+
+/**
+ * فاز ۵۹ — ارزش کل پرونده به قیمت خرید آفر منتخب (selected_offer_item.price × مقدار)، به
+ * تفکیک ارز — عمداً همون زیرمجموعه‌ی اقلام computeSaleValueByCurrency (قیمت فروش نهایی + آفر
+ * منتخب هر دو لازمن)، تا سود هر ارز بعداً با تفریق مستقیم sale-purchase در همون سطل درست باشه.
+ * ⚠️ منبع عمداً inquiry_items.selectedOfferItem است نه order_items.purchase_price — چون
+ * order_items هیچ ستون ارزی نداره (می‌تونه چند تأمین‌کننده/ارز داشته باشه) و جمع خام روی چند
+ * ارز اشتباهه، دقیقاً همون احتیاطی که reports.service.ts برای جمع مبالغ رعایت می‌کنه.
+ */
+function computePurchaseValueByCurrency(items: ListRowItem[] | undefined): Record<string, number> {
+  const totals: Record<string, number> = {};
+  for (const item of items ?? []) {
+    if (item.finalSalePrice == null || !item.selectedOfferItem) continue;
+    const currency = item.selectedOfferItem.currencyCode;
+    totals[currency] =
+      (totals[currency] ?? 0) + Number(item.selectedOfferItem.price) * Number(item.quantity);
+  }
+  return totals;
+}
+
+/**
+ * فاز ۵۹ — سود تقریبی به تفکیک ارز (مبلغ = فروش - خرید، درصد = مبلغ ÷ خرید × ۱۰۰)، دقیقاً
+ * همون فرمول ReportsService.getOrdersPnl (margin/marginPercent) — فقط اینجا در سطح هر ارز
+ * جدا حساب می‌شه چون این دو Record از یک منبع تک‌ارزی نیستن.
+ */
+function computeProfitByCurrency(
+  saleByCurrency: Record<string, number>,
+  purchaseByCurrency: Record<string, number>,
+): Record<string, { amount: number; percent: number | null }> {
+  const currencies = new Set([...Object.keys(saleByCurrency), ...Object.keys(purchaseByCurrency)]);
+  const result: Record<string, { amount: number; percent: number | null }> = {};
+  for (const currency of currencies) {
+    const sale = saleByCurrency[currency] ?? 0;
+    const purchase = purchaseByCurrency[currency] ?? 0;
+    const amount = sale - purchase;
+    result[currency] = { amount, percent: purchase > 0 ? (amount / purchase) * 100 : null };
+  }
+  return result;
+}
+
+/** فاز ۵۹ — شماره(های) یکتای PO مرتبط با این پرونده، از طریق orders → purchase_orders */
+function computePoNumbers(orders: { purchaseOrders: { poNumber: string }[] }[] | undefined): string[] {
+  const set = new Set<string>();
+  for (const order of orders ?? []) {
+    for (const po of order.purchaseOrders) set.add(po.poNumber);
+  }
+  return [...set];
 }
 
 /**
@@ -256,8 +325,17 @@ export class InquiriesService {
       where = this.applyOwnershipScope(where, currentUserId);
     }
 
+    // فاز ۵۹ — یک کوئری برای هر سه دسترسی حساس به‌جای سه‌بار hasPermission جدا (هرکدوم خودش
+    // یک رفت‌وبرگشت دیتابیس مستقله) — نگاه کنید به toListRow برای اینکه هرکدوم چه فیلدی رو کنترل می‌کنه
+    const effectivePermissions = await this.permissions.getEffectivePermissions(currentUserId);
+    const visibility: RowVisibility = {
+      canViewPo: effectivePermissions.some((p) => p.permissionKey === "po.view"),
+      canViewPurchasePrice: effectivePermissions.some((p) => p.permissionKey === "po.view_purchase_price"),
+      canViewProfit: effectivePermissions.some((p) => p.permissionKey === "order.view_profit"),
+    };
+
     if (query.sortBy === "action") {
-      return this.listByActionOrder(where, page, pageSize);
+      return this.listByActionOrder(where, page, pageSize, visibility);
     }
 
     const orderBy: Prisma.InquiryOrderByWithRelationInput =
@@ -278,7 +356,7 @@ export class InquiriesService {
 
     const decorated = await this.attachActionState(rows);
     return {
-      items: decorated.map(({ row, activity }) => this.toListRow(row, activity)),
+      items: decorated.map(({ row, activity }) => this.toListRow(row, activity, visibility)),
       total,
       page,
       pageSize,
@@ -296,6 +374,7 @@ export class InquiriesService {
     where: Prisma.InquiryWhereInput,
     page: number,
     pageSize: number,
+    visibility: RowVisibility,
   ) {
     const total = await this.prisma.inquiry.count({ where });
     const rows = await this.prisma.inquiry.findMany({
@@ -328,7 +407,7 @@ export class InquiriesService {
     const paged = decorated.slice(start, start + pageSize);
 
     return {
-      items: paged.map(({ row, activity }) => this.toListRow(row, activity)),
+      items: paged.map(({ row, activity }) => this.toListRow(row, activity, visibility)),
       total,
       page,
       pageSize,
@@ -374,17 +453,34 @@ export class InquiriesService {
   private toListRow(
     row: Prisma.InquiryGetPayload<{ include: typeof LIST_INCLUDE }>,
     activity: ActionActivity | null,
+    visibility: RowVisibility,
   ) {
-    const { items: rowItems, ...rest } = row;
+    // ⚠️ orders هم از rest جدا می‌شه (نه فقط items) — وگرنه رابطهٔ خام orders/purchaseOrders
+    // بدون توجه به canViewPo مستقیم در پاسخ اسپرد می‌شد
+    const { items: rowItems, orders, ...rest } = row;
     const isOverdue =
       !!activity && (activity.status === "overdue" || (!!activity.dueAt && activity.dueAt.getTime() < Date.now()));
+
+    const saleValueByCurrency = computeSaleValueByCurrency(rowItems);
+    // فقط وقتی واقعاً لازمه محاسبه می‌شه (قیمت خرید یا سود، هرکدوم) — بار دیگه در toListRow تکرار نمی‌شه
+    const purchaseValueByCurrency =
+      visibility.canViewPurchasePrice || visibility.canViewProfit
+        ? computePurchaseValueByCurrency(rowItems)
+        : null;
 
     return {
       ...rest,
       stageLabel:
         (activity?.relatedStageCode && STAGE_CODE_LABEL[activity.relatedStageCode]) || deriveStageLabel(row),
       builders: extractBuilders(rowItems),
-      saleValueByCurrency: computeSaleValueByCurrency(rowItems),
+      saleValueByCurrency,
+      // فاز ۵۹ — هر سه فیلد زیر عمداً کاملاً از پاسخ حذف می‌شن (نه null) وقتی کاربر دسترسی
+      // مربوطه رو نداره — دقیقاً همون الگوی حذف purchasePrice در فاز ۳۵-ب (proposal.service.ts)
+      ...(visibility.canViewPo ? { poNumbers: computePoNumbers(orders) } : {}),
+      ...(visibility.canViewPurchasePrice ? { purchaseValueByCurrency } : {}),
+      ...(visibility.canViewProfit
+        ? { profitByCurrency: computeProfitByCurrency(saleValueByCurrency, purchaseValueByCurrency!) }
+        : {}),
       actionRequired: activity?.subject ?? null,
       actionAssignee: activity?.assignedTo ?? null,
       actionDueAt: activity?.dueAt ?? null,

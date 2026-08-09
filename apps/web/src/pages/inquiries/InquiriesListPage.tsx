@@ -158,6 +158,87 @@ function SaleValueCell({ row }: { row: InquiryListRow }) {
   );
 }
 
+// فاز ۵۹ — چهار ستون زیر فقط برای کاربرانی رندر می‌شن که سرور واقعاً داده رو در پاسخ گذاشته
+// (نگاه کنید به getAvailableColumns) — ولی هرکدوم مستقل با «—» برخورد می‌کنه اگه به هر دلیلی
+// (هنوز قیمت‌گذاری نشده/هنوز PO صادر نشده) داده‌ای برای اون ردیف خاص وجود نداشته باشه
+
+/** فهرست «مبلغ ارز» قیمت خرید — دقیقاً هم‌الگوی saleValueEntries، فقط منبع purchaseValueByCurrency */
+function purchaseValueEntries(row: InquiryListRow): { currency: string; amount: number }[] {
+  return Object.entries(row.purchaseValueByCurrency ?? {})
+    .filter(([, amount]) => amount > 0)
+    .map(([currency, amount]) => ({ currency, amount }));
+}
+
+function PurchasePriceCell({ row }: { row: InquiryListRow }) {
+  const entries = purchaseValueEntries(row);
+  if (entries.length === 0) return <span className="text-xs text-textSecondary">—</span>;
+  return (
+    <div className="text-xs text-textPrimary" dir="ltr">
+      {entries.map(({ currency, amount }) => (
+        <span key={currency} className="block whitespace-nowrap text-left">
+          {fmtAmount(amount)} {currency}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** ستون «شماره PO» — یک پرونده می‌تونه چند PO داشته باشه (چند تأمین‌کننده/محموله) */
+function PoNumberCell({ row }: { row: InquiryListRow }) {
+  const numbers = row.poNumbers ?? [];
+  if (numbers.length === 0) return <span className="text-xs text-textSecondary">—</span>;
+  return (
+    <div className="text-xs text-textPrimary" dir="ltr">
+      {numbers.map((n) => (
+        <span key={n} className="block truncate font-mono" title={n}>
+          {n}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// حضور کلید ارز در profitByCurrency خودش یعنی «داده هست» (بر خلاف مبلغ که می‌تونه منفی/صفر
+// معتبر باشه، پس با amount>0 نمی‌شه فیلتر کرد — یک ضرر واقعی نباید مثل «بدون داده» مخفی بشه)
+function profitEntries(row: InquiryListRow): { currency: string; amount: number; percent: number | null }[] {
+  return Object.entries(row.profitByCurrency ?? {}).map(([currency, v]) => ({ currency, ...v }));
+}
+
+function ProfitAmountCell({ row }: { row: InquiryListRow }) {
+  const entries = profitEntries(row);
+  if (entries.length === 0) return <span className="text-xs text-textSecondary">—</span>;
+  return (
+    <div className="text-xs" dir="ltr">
+      {entries.map(({ currency, amount }) => (
+        <span
+          key={currency}
+          className={`block whitespace-nowrap text-left font-medium ${amount < 0 ? "text-danger" : "text-textPrimary"}`}
+        >
+          {fmtAmount(amount)} {currency}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** درصد سود — طبق الزام کاربر، ارزی که خرید صفر/نامعلوم داره (percent=null) به‌جای عدد حدسی «—» نشون می‌ده */
+function ProfitPercentCell({ row }: { row: InquiryListRow }) {
+  const entries = profitEntries(row).filter((e) => e.percent !== null);
+  if (entries.length === 0) return <span className="text-xs text-textSecondary">—</span>;
+  return (
+    <div className="text-xs" dir="ltr">
+      {entries.map(({ currency, percent }) => (
+        <span
+          key={currency}
+          className={`block whitespace-nowrap text-left font-medium ${(percent as number) < 0 ? "text-danger" : "text-textPrimary"}`}
+        >
+          {fmtAmount(percent as number)}% {currency}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // ------------------------------------------------------------
 // تعریف ستون‌های قابل مرتب‌سازی/فیلتر — هر ستون یک مقدار مرتب‌سازی (عدد/رشته/تاریخ) و
 // یک فهرست «گزینه‌های موجود در این سلول» (برای فیلتر چندانتخابی مثل AutoFilter اکسل)
@@ -172,6 +253,10 @@ type ColumnKey =
   | "action"
   | "status"
   | "saleValue"
+  | "poNumber"
+  | "purchasePrice"
+  | "profitPercent"
+  | "profitAmount"
   | "assignee"
   | "deadline"
   | "priority"
@@ -184,6 +269,10 @@ const COLUMN_LABEL: Record<ColumnKey, string> = {
   action: "نیاز به اقدام",
   status: "مرحله",
   saleValue: "ارزش استعلام",
+  poNumber: "شماره PO",
+  purchasePrice: "قیمت خرید",
+  profitPercent: "درصد سود تقریبی",
+  profitAmount: "مبلغ سود تقریبی",
   assignee: "مسئول فعلی",
   deadline: "سررسید",
   priority: "اولویت",
@@ -197,6 +286,10 @@ const COLUMN_WIDTH_CLASS: Partial<Record<ColumnKey, string>> = {
   buyer: "w-[110px]",
   status: "w-[110px]",
   saleValue: "w-[110px]",
+  poNumber: "w-[110px]",
+  purchasePrice: "w-[110px]",
+  profitPercent: "w-[90px]",
+  profitAmount: "w-[110px]",
   assignee: "w-[100px]",
   deadline: "w-[110px]",
   priority: "w-[75px]",
@@ -207,18 +300,47 @@ const COLUMN_WIDTH_CLASS: Partial<Record<ColumnKey, string>> = {
 // از نمای پیش‌فرض لیست حذف شدن تا ستون‌های اقدام/مسئول/سررسید/اولویت جا باز کنن؛ این داده‌ها
 // همچنان در صفحه جزئیات پرونده در دسترسن. فاز ۵۹ — «ارزش استعلام» طبق درخواست کاربر برگشت
 // (بعد از قفل قیمت‌گذاری نهایی مقدار می‌گیره — قبلش خودِ داده هنوز خالیه، نیازی به شرط جدا نیست).
-const ALL_COLUMNS: ColumnKey[] = [
+//
+// ⚠️ لیست *کامل* ستون‌های ممکن — فقط برای اعتبارسنجی localStorage/emptyColFilters که به‌ازای
+// هر کلید ممکن باید مقدار داشته باشن، مستقل از اینکه کاربر فعلی بهشون دسترسی داره یا نه.
+// برای «کدوم ستون‌ها این نشست قابل‌نمایشن»، از getAvailableColumns (پایین‌تر) استفاده کن، نه این آرایه.
+const ALL_COLUMN_KEYS: ColumnKey[] = [
   "internalNumber",
   "subject",
   "buyer",
   "action",
   "status",
   "saleValue",
+  "poNumber",
+  "purchasePrice",
+  "profitPercent",
+  "profitAmount",
   "assignee",
   "deadline",
   "priority",
   "createdAt",
 ];
+
+/**
+ * فاز ۵۹ — ستون‌های «شماره PO»/«قیمت خرید»/«درصد و مبلغ سود تقریبی» Permission-gated ان
+ * (نگاه کنید به inquiries.service.ts.toListRow): سرور اصلاً این فیلدها رو در پاسخ نمی‌ذاره
+ * وقتی کاربر دسترسی نداره، پس نباید در Column Selector/فیلتر/مرتب‌سازی این نشست ظاهر بشن.
+ * این تابع دقیقاً همون سه پرچمی که سرور برای تصمیم می‌گیره رو مصرف می‌کنه — دو مفهوم جدا
+ * (Permission = چه داده‌ای مجازه، Column Selector = از بین مجازها کدوم نمایش داده بشه)
+ * دقیقاً همین‌جا به‌هم وصل می‌شن: خروجی این تابع «مجازها»ست، انتخاب کاربر جای دیگه (visibleColumns) میاد.
+ */
+function getAvailableColumns(perm: {
+  canViewPo: boolean;
+  canViewPurchasePrice: boolean;
+  canViewProfit: boolean;
+}): ColumnKey[] {
+  const columns: ColumnKey[] = ["internalNumber", "subject", "buyer", "action", "status", "saleValue"];
+  if (perm.canViewPo) columns.push("poNumber");
+  if (perm.canViewPurchasePrice) columns.push("purchasePrice");
+  if (perm.canViewProfit) columns.push("profitPercent", "profitAmount");
+  columns.push("assignee", "deadline", "priority", "createdAt");
+  return columns;
+}
 
 function sortValue(row: InquiryListRow, key: ColumnKey): string | number {
   switch (key) {
@@ -238,6 +360,16 @@ function sortValue(row: InquiryListRow, key: ColumnKey): string | number {
       // چندارزی دقیق قابل جمع‌زدن نیست؛ برای مرتب‌سازی صرفاً مجموع خام همه ارزها کافیه
       // (اکثر پرونده‌ها تک‌ارزن) — دقت واحدی مثل ستون «اولویت» که خودش هم یک تقریبه
       return Object.values(row.saleValueByCurrency).reduce((sum, v) => sum + v, 0);
+    case "poNumber":
+      return row.poNumbers?.[0] ?? "";
+    case "purchasePrice":
+      return Object.values(row.purchaseValueByCurrency ?? {}).reduce((sum, v) => sum + v, 0);
+    case "profitPercent": {
+      const withPercent = profitEntries(row).filter((e) => e.percent !== null);
+      return withPercent.length > 0 ? (withPercent[0].percent as number) : 0;
+    }
+    case "profitAmount":
+      return Object.values(row.profitByCurrency ?? {}).reduce((sum, v) => sum + v.amount, 0);
     case "assignee":
       return row.actionAssignee?.fullName ?? row.salesExpert.fullName;
     case "deadline":
@@ -264,6 +396,26 @@ function columnOptions(row: InquiryListRow, key: ColumnKey): string[] {
       return [INQUIRY_STATUS_META[row.status].label];
     case "saleValue": {
       const entries = saleValueEntries(row);
+      return entries.length > 0
+        ? entries.map(({ currency, amount }) => `${fmtAmount(amount)} ${currency}`)
+        : ["(بدون قیمت‌گذاری نهایی)"];
+    }
+    case "poNumber":
+      return row.poNumbers && row.poNumbers.length > 0 ? row.poNumbers : ["(بدون PO)"];
+    case "purchasePrice": {
+      const entries = purchaseValueEntries(row);
+      return entries.length > 0
+        ? entries.map(({ currency, amount }) => `${fmtAmount(amount)} ${currency}`)
+        : ["(بدون قیمت‌گذاری نهایی)"];
+    }
+    case "profitPercent": {
+      const entries = profitEntries(row).filter((e) => e.percent !== null);
+      return entries.length > 0
+        ? entries.map(({ currency, percent }) => `${fmtAmount(percent as number)}% ${currency}`)
+        : ["(نامعلوم)"];
+    }
+    case "profitAmount": {
+      const entries = profitEntries(row);
       return entries.length > 0
         ? entries.map(({ currency, amount }) => `${fmtAmount(amount)} ${currency}`)
         : ["(بدون قیمت‌گذاری نهایی)"];
@@ -318,12 +470,14 @@ function ColumnFilterMenu({
   colFilters,
   filterValue,
   onChange,
+  availableColumns,
 }: {
   columnKey: ColumnKey;
   sourceRows: InquiryListRow[];
   colFilters: Record<ColumnKey, Set<string> | null>;
   filterValue: Set<string> | null;
   onChange: (next: Set<string> | null) => void;
+  availableColumns: ColumnKey[];
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -346,7 +500,7 @@ function ColumnFilterMenu({
   const options = useMemo(() => {
     if (!open) return [] as { value: string; count: number }[];
     const rowsForOptions = sourceRows.filter((row) =>
-      ALL_COLUMNS.filter((k) => k !== columnKey).every((k) => rowPassesColumn(row, k, colFilters[k])),
+      availableColumns.filter((k) => k !== columnKey).every((k) => rowPassesColumn(row, k, colFilters[k])),
     );
     const counts = new Map<string, number>();
     rowsForOptions.forEach((row) => {
@@ -355,7 +509,7 @@ function ColumnFilterMenu({
     return [...counts.entries()]
       .map(([value, count]) => ({ value, count }))
       .sort((a, b) => a.value.localeCompare(b.value, "fa", { numeric: true }));
-  }, [open, sourceRows, colFilters, columnKey]);
+  }, [open, sourceRows, colFilters, columnKey, availableColumns]);
 
   const filteredOptions = useMemo(() => {
     const q = toLatinDigits(search.trim()).toLowerCase();
@@ -445,22 +599,26 @@ const VISIBLE_COLUMNS_STORAGE_KEY = "septa:inquiries-list:visible-columns";
 function loadVisibleColumns(): Set<ColumnKey> {
   try {
     const raw = localStorage.getItem(VISIBLE_COLUMNS_STORAGE_KEY);
-    if (!raw) return new Set(ALL_COLUMNS);
+    if (!raw) return new Set(ALL_COLUMN_KEYS);
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set(ALL_COLUMNS);
-    const valid = parsed.filter((k): k is ColumnKey => (ALL_COLUMNS as string[]).includes(k as string));
-    return valid.length > 0 ? new Set(valid) : new Set(ALL_COLUMNS);
+    if (!Array.isArray(parsed)) return new Set(ALL_COLUMN_KEYS);
+    const valid = parsed.filter((k): k is ColumnKey => (ALL_COLUMN_KEYS as string[]).includes(k as string));
+    return valid.length > 0 ? new Set(valid) : new Set(ALL_COLUMN_KEYS);
   } catch {
-    return new Set(ALL_COLUMNS);
+    return new Set(ALL_COLUMN_KEYS);
   }
 }
 
-// دراپ‌داون خصوصی‌سازی ستون‌ها — چک‌باکس به‌ازای هر ستون؛ همیشه حداقل یک ستون باید فعال بمونه
+// دراپ‌داون خصوصی‌سازی ستون‌ها — چک‌باکس فقط به‌ازای ستون‌های مجاز این کاربر (available)؛
+// همیشه حداقل یک ستون *مجاز و نمایشی* باید فعال بمونه (نه صرفاً یک آیتم در visible خام — چون
+// visible ممکنه کلیدهایی از قبل داشته باشه که الان دیگه مجاز نیستن، نگاه کنید به فاز ۵۹)
 function ColumnVisibilityMenu({
   visible,
+  available,
   onChange,
 }: {
   visible: Set<ColumnKey>;
+  available: ColumnKey[];
   onChange: (next: Set<ColumnKey>) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -480,7 +638,8 @@ function ColumnVisibilityMenu({
   function toggle(key: ColumnKey) {
     const next = new Set(visible);
     if (next.has(key)) {
-      if (next.size === 1) return; // حداقل یک ستون باید باقی بمونه
+      const visibleAvailableCount = available.filter((k) => next.has(k)).length;
+      if (visibleAvailableCount === 1) return; // حداقل یک ستون مجاز و نمایشی باید باقی بمونه
       next.delete(key);
     } else {
       next.add(key);
@@ -502,7 +661,7 @@ function ColumnVisibilityMenu({
       </button>
       {open && (
         <div className="absolute z-20 top-full mt-1 left-0 w-52 rounded-lg border border-border bg-surface shadow-lg p-2 space-y-0.5">
-          {ALL_COLUMNS.map((key) => (
+          {available.map((key) => (
             <label
               key={key}
               className="flex items-center gap-1.5 text-[11px] text-textPrimary px-1.5 py-1.5 rounded hover:bg-bg cursor-pointer"
@@ -530,6 +689,10 @@ function emptyColFilters(): Record<ColumnKey, Set<string> | null> {
     action: null,
     status: null,
     saleValue: null,
+    poNumber: null,
+    purchasePrice: null,
+    profitPercent: null,
+    profitAmount: null,
     assignee: null,
     deadline: null,
     priority: null,
@@ -542,6 +705,10 @@ export function InquiriesListPage() {
   const { user } = useAuth();
   const canCreate = hasPermission(user, "inquiry.create");
   const canPurge = hasPermission(user, "inquiry.purge");
+  // فاز ۵۹ — سه دسترسی حساس ستون‌های PO/قیمت خرید/سود؛ مستقل از هم (نگاه کنید به getAvailableColumns)
+  const canViewPo = hasPermission(user, "po.view");
+  const canViewPurchasePrice = hasPermission(user, "po.view_purchase_price");
+  const canViewProfit = hasPermission(user, "order.view_profit");
 
   // فاز ۵۸ — پیش‌فرض حالا «نیاز به اقدام» (فوری/عقب‌افتاده اول) به‌جای تاریخ ثبت؛ کلیک روی
   // هدر ستون «ثبت» همچنان مرتب‌سازی زمانی جایگزین رو در دسترس نگه می‌داره
@@ -556,7 +723,16 @@ export function InquiriesListPage() {
     localStorage.setItem(VISIBLE_COLUMNS_STORAGE_KEY, JSON.stringify([...visibleColumns]));
   }, [visibleColumns]);
 
-  const displayColumns = useMemo(() => ALL_COLUMNS.filter((k) => visibleColumns.has(k)), [visibleColumns]);
+  // فاز ۵۹ — «کدوم ستون‌ها مجازن» (Permission) از «کدومشون الان انتخاب شدن» (visibleColumns،
+  // انتخاب شخصی کاربر) عمداً دو محاسبه‌ی جدا هستن؛ displayColumns تقاطع این دوتاست
+  const availableColumns = useMemo(
+    () => getAvailableColumns({ canViewPo, canViewPurchasePrice, canViewProfit }),
+    [canViewPo, canViewPurchasePrice, canViewProfit],
+  );
+  const displayColumns = useMemo(
+    () => availableColumns.filter((k) => visibleColumns.has(k)),
+    [availableColumns, visibleColumns],
+  );
 
   // دیبانس کوتاه — نتیجه عملاً با هر حرف تایپ/حذف‌شده به‌روز می‌شه، بدون شلیک یک درخواست به‌ازای هر keystroke
   const debouncedQuery = useDebounced(query, 200);
@@ -582,7 +758,9 @@ export function InquiriesListPage() {
   const sourceRows = data?.items ?? [];
 
   const rows = useMemo(() => {
-    const filtered = sourceRows.filter((row) => ALL_COLUMNS.every((key) => rowPassesColumn(row, key, colFilters[key])));
+    const filtered = sourceRows.filter((row) =>
+      availableColumns.every((key) => rowPassesColumn(row, key, colFilters[key])),
+    );
     // ستون «نیاز به اقدام» چندکلیدیه (نگاه کنید به compareByAction) — نمی‌شه با sortValue تک‌عددی بیان کرد
     if (sortKey === "action") {
       const sorted = [...filtered].sort(compareByAction);
@@ -597,7 +775,7 @@ export function InquiriesListPage() {
           : String(av).localeCompare(String(bv), "fa");
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [sourceRows, colFilters, sortKey, sortDir]);
+  }, [sourceRows, colFilters, sortKey, sortDir, availableColumns]);
 
   return (
     <div className="space-y-4">
@@ -613,7 +791,7 @@ export function InquiriesListPage() {
           )}
         </p>
         <div className="flex gap-2">
-          <ColumnVisibilityMenu visible={visibleColumns} onChange={setVisibleColumns} />
+          <ColumnVisibilityMenu visible={visibleColumns} available={availableColumns} onChange={setVisibleColumns} />
           {hasActiveColFilters && (
             <button
               onClick={() => setColFilters(emptyColFilters())}
@@ -699,6 +877,7 @@ export function InquiriesListPage() {
                         colFilters={colFilters}
                         filterValue={colFilters[key]}
                         onChange={(next) => setColFilter(key, next)}
+                        availableColumns={availableColumns}
                       />
                     </div>
                   </th>
@@ -728,7 +907,11 @@ export function InquiriesListPage() {
                       row.actionOverdue ? "bg-[#F3E6E4]/50 hover:bg-[#F3E6E4]/70" : "hover:bg-bg"
                     }`}
                   >
-                    {visibleColumns.has("internalNumber") && (
+                    {/* ⚠️ هر شرط زیر روی displayColumns چک می‌شه (نه visibleColumns خام) — چون
+                    displayColumns تقاطع «انتخاب کاربر» و «دسترسی مجاز»ه، دقیقاً همون آرایه‌ای
+                    که <th>ها رو ساخته؛ وگرنه برای کاربری که یک ستون رو در visibleColumns ذخیره‌شده
+                    داره ولی دیگه بهش دسترسی نداره، تعداد <td> با تعداد <th> جفت نمی‌شد */}
+                    {displayColumns.includes("internalNumber") && (
                       <td className="px-3 py-2">
                         <span className="flex items-center gap-1 min-w-0">
                           {row.actionOverdue && <AlertTriangle size={11} className="text-danger shrink-0" />}
@@ -743,7 +926,7 @@ export function InquiriesListPage() {
                         )}
                       </td>
                     )}
-                    {visibleColumns.has("subject") && (
+                    {displayColumns.includes("subject") && (
                       <td className="px-3 py-2 text-xs text-textPrimary">
                         <span className="flex items-center gap-1.5 min-w-0">
                           {row.urgency === "urgent" && <Flame size={12} className="text-danger shrink-0" />}
@@ -751,22 +934,36 @@ export function InquiriesListPage() {
                         </span>
                       </td>
                     )}
-                    {visibleColumns.has("buyer") && (
+                    {displayColumns.includes("buyer") && (
                       <td className="px-3 py-2 text-xs text-textPrimary">
                         <span className="block truncate" title={row.buyer.companyName}>{row.buyer.companyName}</span>
                       </td>
                     )}
                     {/* فاز ۵۸ — «نیاز به اقدام»: عمداً پررنگ‌تر از نشان مرحله، طبق الزام UX */}
-                    {visibleColumns.has("action") && (
+                    {displayColumns.includes("action") && (
                       <td className="px-3 py-2"><ActionCell row={row} /></td>
                     )}
-                    {visibleColumns.has("status") && (
+                    {displayColumns.includes("status") && (
                       <td className="px-3 py-2"><StatusBadge status={row.status} stageLabel={row.stageLabel} /></td>
                     )}
-                    {visibleColumns.has("saleValue") && (
+                    {displayColumns.includes("saleValue") && (
                       <td className="px-3 py-2"><SaleValueCell row={row} /></td>
                     )}
-                    {visibleColumns.has("assignee") && (
+                    {/* فاز ۵۹ — چهار ستون Permission-gated؛ فقط وقتی هم مجازن (availableColumns) هم
+                    کاربر انتخابشون کرده (visibleColumns) در displayColumns حاضرن */}
+                    {displayColumns.includes("poNumber") && (
+                      <td className="px-3 py-2"><PoNumberCell row={row} /></td>
+                    )}
+                    {displayColumns.includes("purchasePrice") && (
+                      <td className="px-3 py-2"><PurchasePriceCell row={row} /></td>
+                    )}
+                    {displayColumns.includes("profitPercent") && (
+                      <td className="px-3 py-2"><ProfitPercentCell row={row} /></td>
+                    )}
+                    {displayColumns.includes("profitAmount") && (
+                      <td className="px-3 py-2"><ProfitAmountCell row={row} /></td>
+                    )}
+                    {displayColumns.includes("assignee") && (
                       <td className="px-3 py-2 text-xs text-textSecondary">
                         <span
                           className="block truncate"
@@ -776,13 +973,13 @@ export function InquiriesListPage() {
                         </span>
                       </td>
                     )}
-                    {visibleColumns.has("deadline") && (
+                    {displayColumns.includes("deadline") && (
                       <td className="px-3 py-2"><DueCell row={row} /></td>
                     )}
-                    {visibleColumns.has("priority") && (
+                    {displayColumns.includes("priority") && (
                       <td className="px-3 py-2"><PriorityBadge priority={row.actionPriority} /></td>
                     )}
-                    {visibleColumns.has("createdAt") && (
+                    {displayColumns.includes("createdAt") && (
                       <td className="px-3 py-2 text-xs text-textSecondary whitespace-nowrap">{formatJalali(row.createdAt)}</td>
                     )}
                   </tr>

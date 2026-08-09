@@ -87,6 +87,9 @@ export const PERMISSION_MODULES: PermissionModuleDef[] = [
       { key: "order.view", label: "مشاهده سفارش‌ها" },
       { key: "order.create", label: "ثبت سفارش مشتری" },
       { key: "order.manage_payments", label: "مدیریت پرداخت‌های مشتری" },
+      // فاز ۵۹ — ستون «سود تقریبی» لیست استعلام‌ها؛ مستقل از po.view_purchase_price
+      // (کسی می‌تونه سود رو ببینه بدون اینکه قیمت خرید خام رو ببینه، طبق درخواست کاربر)
+      { key: "order.view_profit", label: "مشاهده سود تقریبی (فروش منهای خرید)" },
     ],
   },
   {
@@ -96,6 +99,9 @@ export const PERMISSION_MODULES: PermissionModuleDef[] = [
       { key: "po.view", label: "مشاهده PO ها" },
       { key: "po.create", label: "صدور PO" },
       { key: "po.manage_payments", label: "مدیریت پرداخت به تأمین‌کننده" },
+      // فاز ۵۹ — ستون «قیمت خرید» لیست استعلام‌ها (مستقل از po.view — کسی می‌تونه شماره PO
+      // رو ببینه بدون اینکه قیمت خرید رو ببینه، و برعکس)
+      { key: "po.view_purchase_price", label: "مشاهده قیمت خرید تأمین‌کننده" },
     ],
   },
   {
@@ -274,6 +280,9 @@ export const DEFAULT_GROUP_GRANTS: Record<string, string[]> = {
     "shipping.manage_freight_rfq",
     "shipping.manage_shipment",
     "inquiry.assign_procurement_owner",
+    // فاز ۵۹ — بازرگانی همون کسیه که قیمت خرید رو در مرحلهٔ انتخاب نهایی وارد می‌کنه؛
+    // عمداً بدون order.view_profit (حاشیهٔ سود/استراتژی قیمت‌گذاری، نه دامنهٔ عملیاتی بازرگانی)
+    "po.view_purchase_price",
     "partners.view_suppliers",
     "partners.create",
     "catalog.view",
@@ -290,6 +299,10 @@ export const DEFAULT_GROUP_GRANTS: Record<string, string[]> = {
   مالی: [
     "order.manage_payments",
     "po.manage_payments",
+    // فاز ۵۹ — مالی قبلاً هم از طریق reports.view_orders_pnl سود/زیان کامل رو می‌دید؛
+    // این دو کلید همون دید رو در سطح ردیف لیست استعلام‌ها هم می‌ده
+    "po.view_purchase_price",
+    "order.view_profit",
     "settlement.issue_invoice",
     "settlement.record_collection",
     "inquiry.assign_finance_owner",

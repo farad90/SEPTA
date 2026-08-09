@@ -53,6 +53,16 @@ export interface InquiryListRow {
   /** ارزش کل پرونده به قیمت فروش نهایی (final_sale_price × مقدار)، به تفکیک ارز — بدون تبدیل نرخ */
   saleValueByCurrency: Record<string, number>;
 
+  // فاز ۵۹ — سه فیلد زیر Permission-gated ان: سرور فقط وقتی کاربر دسترسی مربوطه رو داشته
+  // باشه کلید رو در پاسخ می‌ذاره (وگرنه کاملاً غایبه، نه null) — نگاه کنید به
+  // inquiries.service.ts.toListRow. بنابراین هرکدوم در فرانت هم optional ان.
+  /** شماره(های) PO مرتبط با این پرونده — فقط با دسترسی po.view */
+  poNumbers?: string[];
+  /** ارزش کل به قیمت خرید آفر منتخب، به تفکیک ارز — فقط با po.view_purchase_price */
+  purchaseValueByCurrency?: Record<string, number>;
+  /** سود تقریبی (فروش - خرید) به تفکیک ارز — فقط با order.view_profit */
+  profitByCurrency?: Record<string, { amount: number; percent: number | null }>;
+
   // فاز ۵۸ — وضعیت عملیاتی مشتق از آخرین Activity باز مرتبط با این پرونده (فقط در لیست؛
   // GET /inquiries/:id این فیلدها رو برنمی‌گردونه — نگاه کنید به InquiryDetail پایین‌تر)
   /** متن «چه کاری الان لازمه» — null یعنی هیچ Activity باز سیستمی برای این پرونده نیست */
@@ -95,6 +105,9 @@ export interface InquiryDetail
     | "_count"
     | "builders"
     | "saleValueByCurrency"
+    | "poNumbers"
+    | "purchaseValueByCurrency"
+    | "profitByCurrency"
     | "actionRequired"
     | "actionAssignee"
     | "actionDueAt"

@@ -45,7 +45,12 @@ function buildService(prisma: ReturnType<typeof buildPrisma>) {
   const numberService = { nextNumber: jest.fn().mockResolvedValue("INQ-2026-0001") };
   const activityLog = { log: jest.fn().mockResolvedValue({}) };
   const notifications = { create: jest.fn().mockResolvedValue({}), clearForEntity: jest.fn().mockResolvedValue({}) };
-  const permissions = { hasPermission: jest.fn().mockResolvedValue(false) };
+  const permissions = {
+    hasPermission: jest.fn().mockResolvedValue(false),
+    // فاز ۵۹ — list() برای ستون‌های حساس (PO/قیمت خرید/سود) این رو یک‌بار می‌خونه به‌جای
+    // سه‌بار hasPermission؛ پیش‌فرض خالی یعنی هیچ‌کدوم از این سه دسترسی رو نداره
+    getEffectivePermissions: jest.fn().mockResolvedValue([]),
+  };
   const service = new InquiriesService(
     prisma as unknown as PrismaService,
     numberService as unknown as InquiryNumberService,
@@ -507,5 +512,97 @@ describe("InquiriesService — محرمانگی اطلاعات بازرگانی 
     const rows = await service.listDiscussions(INQUIRY_ID, USER_ID);
 
     expect(rows[0].commentText).toContain("Siemens AG");
+  });
+});
+
+describe("InquiriesService — فاز ۵۹: دسترسی ردیفی ستون‌های PO/قیمت خرید/سود", () => {
+  const PRICED_ROW = {
+    status: "in_progress",
+    selectionLockedAt: new Date(),
+    _count: { items: 1, rfqs: 1 },
+    items: [
+      {
+        builder: null,
+        quantity: 10,
+        finalSalePrice: 600,
+        selectedOfferItem: { currencyCode: "EUR", price: 500 },
+      },
+    ],
+    orders: [{ purchaseOrders: [{ poNumber: "PO-2026-0001" }] }],
+  };
+
+  function setupList(prisma: ReturnType<typeof buildPrisma>) {
+    prisma.inquiry.findMany.mockResolvedValue([PRICED_ROW]);
+    prisma.inquiry.count.mockResolvedValue(1);
+    prisma.$transaction.mockImplementation(async (ops: unknown[]) => Promise.all(ops as Promise<unknown>[]));
+  }
+
+  it("بدون هیچ‌کدوم از سه دسترسی، poNumbers/purchaseValueByCurrency/profitByCurrency کاملاً از پاسخ حذف می‌شن (نه null)", async () => {
+    const prisma = buildPrisma();
+    setupList(prisma);
+    const { service, permissions } = buildService(prisma);
+    permissions.getEffectivePermissions.mockResolvedValue([]);
+
+    const { items } = await service.list({}, USER_ID);
+
+    expect(items[0].saleValueByCurrency).toEqual({ EUR: 6000 });
+    expect(items[0]).not.toHaveProperty("poNumbers");
+    expect(items[0]).not.toHaveProperty("purchaseValueByCurrency");
+    expect(items[0]).not.toHaveProperty("profitByCurrency");
+  });
+
+  it("با po.view_purchase_price بدون order.view_profit، فقط purchaseValueByCurrency می‌آد نه profitByCurrency", async () => {
+    const prisma = buildPrisma();
+    setupList(prisma);
+    const { service, permissions } = buildService(prisma);
+    permissions.getEffectivePermissions.mockResolvedValue([{ permissionKey: "po.view_purchase_price" }]);
+
+    const { items } = await service.list({}, USER_ID);
+
+    expect(items[0].purchaseValueByCurrency).toEqual({ EUR: 5000 });
+    expect(items[0]).not.toHaveProperty("profitByCurrency");
+    expect(items[0]).not.toHaveProperty("poNumbers");
+  });
+
+  it("با order.view_profit بدون po.view_purchase_price، فقط profitByCurrency می‌آد نه قیمت خرید خام", async () => {
+    const prisma = buildPrisma();
+    setupList(prisma);
+    const { service, permissions } = buildService(prisma);
+    permissions.getEffectivePermissions.mockResolvedValue([{ permissionKey: "order.view_profit" }]);
+
+    const { items } = await service.list({}, USER_ID);
+
+    expect(items[0].profitByCurrency).toEqual({ EUR: { amount: 1000, percent: 20 } });
+    expect(items[0]).not.toHaveProperty("purchaseValueByCurrency");
+  });
+
+  it("با po.view، فقط poNumbers می‌آد", async () => {
+    const prisma = buildPrisma();
+    setupList(prisma);
+    const { service, permissions } = buildService(prisma);
+    permissions.getEffectivePermissions.mockResolvedValue([{ permissionKey: "po.view" }]);
+
+    const { items } = await service.list({}, USER_ID);
+
+    expect(items[0].poNumbers).toEqual(["PO-2026-0001"]);
+    expect(items[0]).not.toHaveProperty("purchaseValueByCurrency");
+    expect(items[0]).not.toHaveProperty("profitByCurrency");
+  });
+
+  it("با هر سه دسترسی، هر سه فیلد با مقادیر درست برمی‌گردن", async () => {
+    const prisma = buildPrisma();
+    setupList(prisma);
+    const { service, permissions } = buildService(prisma);
+    permissions.getEffectivePermissions.mockResolvedValue([
+      { permissionKey: "po.view" },
+      { permissionKey: "po.view_purchase_price" },
+      { permissionKey: "order.view_profit" },
+    ]);
+
+    const { items } = await service.list({}, USER_ID);
+
+    expect(items[0].poNumbers).toEqual(["PO-2026-0001"]);
+    expect(items[0].purchaseValueByCurrency).toEqual({ EUR: 5000 });
+    expect(items[0].profitByCurrency).toEqual({ EUR: { amount: 1000, percent: 20 } });
   });
 });
