@@ -9,6 +9,7 @@ import {
   Download,
   FileSearch,
   Filter,
+  FilterX,
   Flame,
   ListChecks,
   Plus,
@@ -19,7 +20,7 @@ import { useAuth } from "../../lib/auth-context";
 import { hasPermission } from "../../lib/permissions";
 import { useDebounced } from "../../lib/use-debounced";
 import { formatJalali, toLatinDigits } from "../../lib/jalali";
-import { PrimaryButton, TextInput } from "../../components/ui/fields";
+import { GhostButton, PrimaryButton, TextInput } from "../../components/ui/fields";
 import { ActionPriority, INQUIRY_STATUS_META, InquiryListRow, InquiryStatus } from "./inquiry-types";
 import { exportInquiries, useInquiries } from "./inquiries-api";
 
@@ -148,7 +149,7 @@ function SaleValueCell({ row }: { row: InquiryListRow }) {
   const entries = saleValueEntries(row);
   if (entries.length === 0) return <span className="text-xs text-textSecondary">—</span>;
   return (
-    <div className="text-xs text-textPrimary" dir="ltr">
+    <div className="text-xs font-mono text-textPrimary" dir="ltr">
       {entries.map(({ currency, amount }) => (
         <span key={currency} className="block whitespace-nowrap text-left">
           {fmtAmount(amount)} {currency}
@@ -173,7 +174,7 @@ function PurchasePriceCell({ row }: { row: InquiryListRow }) {
   const entries = purchaseValueEntries(row);
   if (entries.length === 0) return <span className="text-xs text-textSecondary">—</span>;
   return (
-    <div className="text-xs text-textPrimary" dir="ltr">
+    <div className="text-xs font-mono text-textPrimary" dir="ltr">
       {entries.map(({ currency, amount }) => (
         <span key={currency} className="block whitespace-nowrap text-left">
           {fmtAmount(amount)} {currency}
@@ -208,7 +209,7 @@ function ProfitAmountCell({ row }: { row: InquiryListRow }) {
   const entries = profitEntries(row);
   if (entries.length === 0) return <span className="text-xs text-textSecondary">—</span>;
   return (
-    <div className="text-xs" dir="ltr">
+    <div className="text-xs font-mono" dir="ltr">
       {entries.map(({ currency, amount }) => (
         <span
           key={currency}
@@ -228,7 +229,7 @@ function ProfitPercentCell({ row }: { row: InquiryListRow }) {
   const entries = profitEntries(row).filter((e) => e.percent !== null);
   if (entries.length === 0) return <span className="text-xs text-textSecondary">—</span>;
   return (
-    <div className="text-xs" dir="ltr">
+    <div className="text-xs font-mono" dir="ltr">
       {entries.map(({ currency, percent }) => (
         <span
           key={currency}
@@ -459,7 +460,7 @@ function SortHeader({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1 text-[11px] font-medium transition-colors duration-150 shrink-0 ${
+      className={`flex items-center gap-1 -my-1 py-1 text-[11px] font-medium transition-colors duration-150 shrink-0 cursor-pointer ${
         active ? "text-primary" : "text-textSecondary hover:text-textPrimary"
       }`}
     >
@@ -545,7 +546,7 @@ function ColumnFilterMenu({
     <div className="relative" ref={containerRef}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className={`p-0.5 rounded transition-colors duration-150 ${
+        className={`p-1 rounded transition-colors duration-150 cursor-pointer ${
           active ? "text-primary" : "text-textSecondary/60 hover:text-textSecondary"
         }`}
         aria-label={`فیلتر ${COLUMN_LABEL[columnKey]}`}
@@ -554,7 +555,7 @@ function ColumnFilterMenu({
       </button>
       {open && (
         <div
-          className="absolute z-20 top-full mt-1 right-0 w-56 rounded-lg border border-border bg-surface shadow-lg p-2 space-y-2"
+          className="absolute z-20 top-full mt-1 right-0 w-56 rounded-lg border border-border bg-surface shadow-dropdown p-2 space-y-2 animate-pop-in origin-top-right"
           onClick={(e) => e.stopPropagation()}
         >
           <input
@@ -562,13 +563,13 @@ function ColumnFilterMenu({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="جستجو در مقادیر..."
-            className="w-full text-[11px] px-2 py-1 rounded-md border border-border bg-bg focus:outline-none focus:border-primary"
+            className="w-full text-[11px] px-2 py-1.5 rounded-md border border-border bg-bg transition-colors duration-150 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
           />
           <div className="flex items-center gap-2 text-[10.5px]">
-            <button className="text-primary hover:underline" onClick={() => onChange(null)}>
+            <button className="text-primary hover:underline cursor-pointer" onClick={() => onChange(null)}>
               انتخاب همه
             </button>
-            <button className="text-textSecondary hover:underline" onClick={() => onChange(new Set())}>
+            <button className="text-textSecondary hover:underline cursor-pointer" onClick={() => onChange(new Set())}>
               پاک کردن
             </button>
           </div>
@@ -585,7 +586,7 @@ function ColumnFilterMenu({
                   type="checkbox"
                   checked={isChecked(opt.value)}
                   onChange={() => toggleValue(opt.value)}
-                  className="shrink-0"
+                  className="shrink-0 accent-primary cursor-pointer"
                 />
                 <span className="truncate flex-1" title={opt.value}>{opt.value}</span>
                 <span className="text-textSecondary/70 shrink-0">{opt.count}</span>
@@ -658,7 +659,7 @@ function ColumnVisibilityMenu({
     <div className="relative" ref={containerRef}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-1.5 text-xs px-3.5 py-2.5 rounded-lg border transition-all duration-150 ${
+        className={`flex items-center gap-1.5 text-xs px-4 py-2.5 rounded-lg border transition-all duration-150 cursor-pointer ${
           open
             ? "text-primary border-primary/40 bg-accentSoft"
             : "text-textSecondary border-border hover:text-textPrimary hover:border-textSecondary/40 hover:bg-bg"
@@ -667,7 +668,7 @@ function ColumnVisibilityMenu({
         <Columns3 size={13} /> ستون‌ها
       </button>
       {open && (
-        <div className="absolute z-20 top-full mt-1 left-0 w-52 rounded-lg border border-border bg-surface shadow-lg p-2 space-y-0.5">
+        <div className="absolute z-20 top-full mt-1 left-0 w-52 rounded-lg border border-border bg-surface shadow-dropdown p-2 space-y-0.5 animate-pop-in origin-top-left">
           {available.map((key) => (
             <label
               key={key}
@@ -677,7 +678,7 @@ function ColumnVisibilityMenu({
                 type="checkbox"
                 checked={visible.has(key)}
                 onChange={() => toggle(key)}
-                className="shrink-0"
+                className="shrink-0 accent-primary cursor-pointer"
               />
               {COLUMN_LABEL[key]}
             </label>
@@ -812,17 +813,14 @@ export function InquiriesListPage() {
             ""
           )}
         </p>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <ColumnVisibilityMenu visible={visibleColumns} available={availableColumns} onChange={setVisibleColumns} />
           {hasActiveColFilters && (
-            <button
-              onClick={() => setColFilters(emptyColFilters())}
-              className="flex items-center gap-1.5 text-xs px-3.5 py-2.5 rounded-lg text-textSecondary border border-border transition-all duration-150 hover:text-textPrimary hover:border-textSecondary/40 hover:bg-bg"
-            >
-              پاک کردن فیلترها
-            </button>
+            <GhostButton onClick={() => setColFilters(emptyColFilters())} className="cursor-pointer">
+              <span className="flex items-center gap-1.5"><FilterX size={13} /> پاک کردن فیلترها</span>
+            </GhostButton>
           )}
-          <button
+          <GhostButton
             disabled={exporting}
             onClick={async () => {
               setExporting(true);
@@ -832,36 +830,33 @@ export function InquiriesListPage() {
                 setExporting(false);
               }
             }}
-            className="flex items-center gap-1.5 text-xs px-3.5 py-2.5 rounded-lg text-textSecondary border border-border transition-all duration-150 hover:text-textPrimary hover:border-textSecondary/40 hover:bg-bg disabled:opacity-60"
+            className="cursor-pointer disabled:cursor-not-allowed"
           >
-            <Download size={13} /> {exporting ? "در حال آماده‌سازی..." : "خروجی اکسل"}
-          </button>
+            <span className="flex items-center gap-1.5">
+              <Download size={13} /> {exporting ? "در حال آماده‌سازی..." : "خروجی اکسل"}
+            </span>
+          </GhostButton>
           {canPurge && (
-            <button
-              onClick={() => navigate("/inquiries/deleted")}
-              className="flex items-center gap-1.5 text-xs px-3.5 py-2.5 rounded-lg text-textSecondary border border-border transition-all duration-150 hover:text-textPrimary hover:border-textSecondary/40 hover:bg-bg"
-            >
-              <Trash2 size={13} /> سطل حذف‌شده‌ها
-            </button>
+            <GhostButton onClick={() => navigate("/inquiries/deleted")} className="cursor-pointer">
+              <span className="flex items-center gap-1.5"><Trash2 size={13} /> سطل حذف‌شده‌ها</span>
+            </GhostButton>
           )}
           {canCreate && (
-            <PrimaryButton onClick={() => navigate("/inquiries/new")}>
+            <PrimaryButton onClick={() => navigate("/inquiries/new")} className="cursor-pointer">
               <span className="flex items-center gap-1.5"><Plus size={14} /> استعلام جدید</span>
             </PrimaryButton>
           )}
         </div>
       </div>
 
-      <div className="p-3.5 rounded-xl bg-surface border border-border shadow-card shrink-0">
-        <div className="relative">
-          <Search size={15} className="absolute top-1/2 -translate-y-1/2 right-3 text-textSecondary" />
-          <TextInput
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="جستجو در شماره، موضوع، مشتری، کارشناس، کالا، پارت‌نامبر، برند..."
-            className="pr-9"
-          />
-        </div>
+      <div className="relative shrink-0">
+        <Search size={15} className="absolute top-1/2 -translate-y-1/2 right-3 text-textSecondary" />
+        <TextInput
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="جستجو در شماره، موضوع، مشتری، کارشناس، کالا، پارت‌نامبر، برند..."
+          className="pr-9"
+        />
       </div>
 
       {isLoading && (
@@ -889,7 +884,7 @@ export function InquiriesListPage() {
                   return (
                     <th
                       key={key}
-                      className="sticky top-0 z-10 bg-surface border-b border-border px-3 py-2.5 align-bottom"
+                      className="sticky top-0 z-10 bg-bg border-b border-border px-3 py-2.5 align-bottom"
                       style={{ width: minWidth, minWidth }}
                     >
                       <div className="flex items-center justify-between gap-1">
@@ -927,7 +922,12 @@ export function InquiriesListPage() {
                   <tr
                     key={row.id}
                     onClick={() => navigate(`/inquiries/${row.id}`)}
-                    className={`cursor-pointer transition-colors duration-150 ${
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") navigate(`/inquiries/${row.id}`);
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    className={`cursor-pointer outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 ${
                       row.actionOverdue ? "bg-[#F3E6E4]/50 hover:bg-[#F3E6E4]/70" : "hover:bg-bg"
                     }`}
                   >
