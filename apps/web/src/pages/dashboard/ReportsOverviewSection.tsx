@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeftRight, CircleCheck, PieChart, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, CircleCheck, Inbox, PieChart, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../lib/auth-context";
 import { hasPermission } from "../../lib/permissions";
@@ -10,7 +10,14 @@ import {
   usePaymentsReport,
   useRfqResponseRate,
 } from "../reports/reports-api";
-import { HorizontalBars, KpiTile, ProgressRing } from "../../components/charts/MiniCharts";
+import {
+  BarsChartSkeleton,
+  HorizontalBars,
+  KpiTile,
+  KpiTileSkeleton,
+  ProgressRing,
+  RingChartSkeleton,
+} from "../../components/charts/MiniCharts";
 
 const fmt = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 0 });
 
@@ -36,14 +43,17 @@ function ChartCard({
   return (
     <div className="rounded-xl p-5 bg-surface border border-border shadow-card transition-all duration-150 hover:shadow-card-hover">
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <span className="w-7 h-7 rounded-lg bg-accentSoft text-accent flex items-center justify-center shrink-0">
             {icon}
           </span>
           <p className="text-sm font-bold text-textPrimary tracking-tight">{title}</p>
         </div>
         {linkTo && (
-          <Link to={linkTo} className="text-[11px] text-textSecondary transition-colors duration-150 hover:text-primary">
+          <Link
+            to={linkTo}
+            className="text-[11px] text-textSecondary transition-colors duration-150 hover:text-primary shrink-0"
+          >
             گزارش کامل ←
           </Link>
         )}
@@ -53,12 +63,14 @@ function ChartCard({
   );
 }
 
-function LoadingSkeleton() {
+/** حالت خالی هم‌الگوی InquiriesListPage — آیکون + متن، به‌جای فقط یک خط متن خاکستری */
+function EmptyState({ message }: { message: string }) {
   return (
-    <div className="py-4 space-y-2">
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="h-8 rounded-lg skeleton" />
-      ))}
+    <div className="py-6 text-center">
+      <div className="w-9 h-9 rounded-full bg-bg flex items-center justify-center mx-auto mb-2.5">
+        <Inbox size={16} className="text-textSecondary" />
+      </div>
+      <p className="text-xs text-textSecondary">{message}</p>
     </div>
   );
 }
@@ -74,7 +86,7 @@ function ConversionWidget({ ownScoped, userId }: { ownScoped: boolean; userId?: 
   return (
     <ChartCard title="تبدیل استعلام به سفارش" icon={<PieChart size={14} />} linkTo="/reports/conversion">
       {isLoading || !overall ? (
-        <LoadingSkeleton />
+        <RingChartSkeleton />
       ) : (
         <div className="flex items-center gap-5">
           <ProgressRing
@@ -114,9 +126,9 @@ function OrdersPnlWidget() {
   return (
     <ChartCard title="سود و زیان سفارشات" icon={<Wallet size={14} />} linkTo="/reports/orders-pnl">
       {isLoading ? (
-        <LoadingSkeleton />
+        <BarsChartSkeleton rows={2} />
       ) : currencyEntries.length === 0 ? (
-        <p className="text-xs text-textSecondary py-6 text-center">سفارش تسویه‌شده‌ای برای نمایش وجود ندارد.</p>
+        <EmptyState message="سفارش تسویه‌شده‌ای برای نمایش وجود ندارد." />
       ) : (
         <div className="space-y-4">
           {currencyEntries.map(([currency, totals]) => (
@@ -160,9 +172,9 @@ function PaymentsThisMonthWidget() {
   return (
     <ChartCard title="پرداختی‌ها و دریافتی‌های این ماه" icon={<ArrowLeftRight size={14} />} linkTo="/reports/payments">
       {isLoading ? (
-        <LoadingSkeleton />
+        <BarsChartSkeleton rows={2} />
       ) : currencyEntries.length === 0 ? (
-        <p className="text-xs text-textSecondary py-6 text-center">برای این ماه داده‌ای ثبت نشده.</p>
+        <EmptyState message="برای این ماه داده‌ای ثبت نشده." />
       ) : (
         <div className="space-y-4">
           {overdueCount > 0 && (
@@ -199,9 +211,9 @@ function RfqResponseRateWidget() {
   return (
     <ChartCard title="نرخ پاسخ‌دهی تأمین‌کنندگان" icon={<CircleCheck size={14} />}>
       {isLoading || !data ? (
-        <LoadingSkeleton />
+        <RingChartSkeleton />
       ) : data.total === 0 ? (
-        <p className="text-xs text-textSecondary py-6 text-center">هنوز استعلام قیمتی از تأمین‌کننده ثبت نشده.</p>
+        <EmptyState message="هنوز استعلام قیمتی از تأمین‌کننده ثبت نشده." />
       ) : (
         <div className="flex items-center gap-5">
           <ProgressRing
@@ -236,35 +248,43 @@ function RfqResponseRateWidget() {
 
 function KpiRow({ canPnl, canOwnSales }: { canPnl: boolean; canOwnSales: boolean }) {
   const yearStart = startOfJalaliYearIso();
-  const { data: pnl } = useOrdersPnlReport(canPnl ? { dateFrom: yearStart } : {}, canPnl);
-  const { data: ownSales } = useOwnSalesSummary(canOwnSales);
+  const { data: pnl, isLoading: pnlLoading } = useOrdersPnlReport(canPnl ? { dateFrom: yearStart } : {}, canPnl);
+  const { data: ownSales, isLoading: ownSalesLoading } = useOwnSalesSummary(canOwnSales);
 
   const tiles: React.ReactNode[] = [];
 
   if (canPnl) {
-    const total = Object.entries(pnl?.totalsByCurrency ?? {})[0];
-    tiles.push(
-      <KpiTile
-        key="annual-total"
-        label={total ? `مبلغ کل فروش امسال (${total[0]})` : "مبلغ کل فروش امسال"}
-        value={total ? fmt(total[1].totalSale) : "—"}
-        tone="accent"
-        icon={<Wallet size={15} />}
-      />,
-    );
+    if (pnlLoading) {
+      tiles.push(<KpiTileSkeleton key="annual-total" />);
+    } else {
+      const total = Object.entries(pnl?.totalsByCurrency ?? {})[0];
+      tiles.push(
+        <KpiTile
+          key="annual-total"
+          label={total ? `مبلغ کل فروش امسال (${total[0]})` : "مبلغ کل فروش امسال"}
+          value={total ? fmt(total[1].totalSale) : "—"}
+          tone="accent"
+          icon={<Wallet size={15} />}
+        />,
+      );
+    }
   }
 
   if (canOwnSales) {
-    const total = Object.entries(ownSales?.totalsByCurrency ?? {})[0];
-    tiles.push(
-      <KpiTile
-        key="own-annual-total"
-        label={total ? `مبلغ سفارشات من امسال (${total[0]})` : "مبلغ سفارشات من امسال"}
-        value={total ? fmt(total[1]) : "—"}
-        tone="accent"
-        icon={<Wallet size={15} />}
-      />,
-    );
+    if (ownSalesLoading) {
+      tiles.push(<KpiTileSkeleton key="own-annual-total" />);
+    } else {
+      const total = Object.entries(ownSales?.totalsByCurrency ?? {})[0];
+      tiles.push(
+        <KpiTile
+          key="own-annual-total"
+          label={total ? `مبلغ سفارشات من امسال (${total[0]})` : "مبلغ سفارشات من امسال"}
+          value={total ? fmt(total[1]) : "—"}
+          tone="accent"
+          icon={<Wallet size={15} />}
+        />,
+      );
+    }
   }
 
   if (tiles.length === 0) return null;
@@ -293,7 +313,7 @@ export function ReportsOverviewSection() {
   return (
     <div className="space-y-4">
       <KpiRow canPnl={canPnl} canOwnSales={showOwnSalesTile} />
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {canConversion && <ConversionWidget ownScoped={ownScopedConversion} userId={user?.id} />}
         {canPnl && <OrdersPnlWidget />}
         {canPayments && <PaymentsThisMonthWidget />}
