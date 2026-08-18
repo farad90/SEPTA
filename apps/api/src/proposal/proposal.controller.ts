@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  UseGuards,
+} from "@nestjs/common";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { CurrentUser, RequestUser } from "../auth/decorators/current-user.decorator";
 import { PermissionsGuard } from "../permissions/permissions.guard";
@@ -9,6 +19,7 @@ import {
   SaveFinancialProposalDto,
   SaveTechnicalProposalDto,
   SetProposalFileDto,
+  SaveSalesAdjustmentDto,
 } from "./dto/proposal.dto";
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -88,6 +99,23 @@ export class ProposalController {
   @Post("technical/revise")
   reviseTechnical(@Param("id", ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
     return this.service.reviseTechnical(id, user.userId);
+  }
+
+  // ------------------------------------------------------------
+  // فاز ۶۰ (اصلاح) — اصلاح فروش: فقط تنظیم قیمت نهایی نسبت به قیمت محاسبه‌شده بازرگانی
+  // (که حالا در SelectionController/pricing-options مدیریت می‌شه) — هرگز مارک‌آپ/قیمت
+  // بازرگانی رو تغییر نمی‌ده. مرجع اطلاعات: inquiries/:id/selection/pricing-options
+  // ------------------------------------------------------------
+
+  @RequirePermissions("proposal.edit_price")
+  @Patch("pricing-options/:optionId/sales-adjustment")
+  saveSalesAdjustment(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("optionId", ParseUUIDPipe) optionId: string,
+    @Body() dto: SaveSalesAdjustmentDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.saveSalesAdjustment(id, optionId, dto, user.userId);
   }
 }
 

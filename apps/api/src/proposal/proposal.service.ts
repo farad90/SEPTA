@@ -5,7 +5,11 @@ import { SelectionService } from "../selection/selection.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { ActivitiesService } from "../activities/activities.service";
 import { ProposalNumberService } from "./proposal-number.service";
-import { SaveFinancialProposalDto, SaveTechnicalProposalDto } from "./dto/proposal.dto";
+import {
+  SaveFinancialProposalDto,
+  SaveTechnicalProposalDto,
+  SaveSalesAdjustmentDto,
+} from "./dto/proposal.dto";
 
 interface BaselineItem {
   inquiryItemId: string;
@@ -89,11 +93,18 @@ export class ProposalService {
       baseline.deliveryOptions,
       financialBase.chosenDeliveryTerm,
     );
+    // فاز ۶۰ (اصلاح) — گزینه‌های ترم تحویل («یک پیشنهاد، چند Incoterm») حالا در سطح خودِ استعلام
+    // زندگی می‌کنن (InquiryPricingOption)، مستقل از این‌که این نسخه پیشنهاد وجود داره یا نه —
+    // تعیین/ویرایش‌شون در تب «انتخاب نهایی و قیمت‌گذاری» (SelectionService) انجام می‌شه؛ اینجا
+    // فقط برای نمایش/اصلاح فروش خونده می‌شن. ساختار قدیمی flat (chosenDeliveryTerm/items بالا) دست‌نخورده باقی می‌مونه
+    const pricingDeliveryOptions = await this.selection.listPricingOptions(inquiryId);
+
     const financialFormatted = {
       ...financialBase,
       deliveryExtraCost: deliveryDistribution.extraCost,
       totalAmount: deliveryDistribution.subTotal,
       totalAmountWithDelivery: deliveryDistribution.grandTotal,
+      pricingDeliveryOptions,
       items: financialBase.items.map((item) => {
         const pending = pendingByItemId.get(item.id);
         return {
@@ -273,7 +284,12 @@ export class ProposalService {
         !isCurrencyChange && inquiryItem?.finalSalePrice != null ? Number(inquiryItem.finalSalePrice) : null;
 
       if (baselinePrice != null && finalSalePrice < baselinePrice) {
-        await this.requestPriceReduction(existing.id, finalSalePrice, currentUserId, current);
+        await this.requestPriceReduction(
+          { financialProposalItemId: existing.id },
+          finalSalePrice,
+          currentUserId,
+          `پیشنهاد مالی ${current.proposalNumber}`,
+        );
         continue;
       }
 
@@ -302,15 +318,21 @@ export class ProposalService {
     return this.getProposal(inquiryId);
   }
 
-  /** فاز ۳۵-ج — ساخت/به‌روزرسانی درخواست تأیید کاهش قیمت + اعلان قابل‌اقدام برای دارندگان proposal.approve_price_reduction */
+  /**
+   * فاز ۳۵-ج — ساخت/به‌روزرسانی درخواست تأیید کاهش قیمت + اعلان قابل‌اقدام برای دارندگان
+   * proposal.approve_price_reduction.
+   * فاز ۶۰ (اصلاح) — دو منشأ ممکن (هم‌الگوی letters فرستنده/گیرنده): مسیر «تخت»/تک‌ترمی قدیمی
+   * (financialProposalItemId) یا مسیر جدید «چند گزینه ترم تحویل» (pricingOptionItemId) — دقیقاً
+   * یکی از این دو باید پر باشه.
+   */
   private async requestPriceReduction(
-    financialProposalItemId: string,
+    itemRef: { financialProposalItemId: string } | { pricingOptionItemId: string },
     requestedPrice: number,
     currentUserId: string,
-    proposal: { proposalNumber: string; version: number },
+    contextLabel: string,
   ) {
     const existingRequest = await this.prisma.financialProposalPriceChangeRequest.findFirst({
-      where: { financialProposalItemId, status: "pending" },
+      where: { ...itemRef, status: "pending" },
     });
     const request = existingRequest
       ? await this.prisma.financialProposalPriceChangeRequest.update({
@@ -318,7 +340,7 @@ export class ProposalService {
           data: { requestedPrice, requestedBy: currentUserId },
         })
       : await this.prisma.financialProposalPriceChangeRequest.create({
-          data: { financialProposalItemId, requestedPrice, requestedBy: currentUserId },
+          data: { ...itemRef, requestedPrice, requestedBy: currentUserId },
         });
 
     const approvers = await this.prisma.user.findMany({
@@ -334,7 +356,7 @@ export class ProposalService {
       await this.notifications.create({
         userId: approver.id,
         type: "proposal_price_reduction_request",
-        title: `درخواست کاهش قیمت پیشنهاد ${proposal.proposalNumber}`,
+        title: `درخواست کاهش قیمت ${contextLabel}`,
         message: `قیمت پیشنهادی جدید: ${requestedPrice} — کمتر از قیمت پایه تعیین‌شدهٔ مدیریت`,
         relatedEntityType: "proposal_price_change_request",
         relatedEntityId: request.id,
@@ -351,9 +373,15 @@ export class ProposalService {
     const request = await this.prisma.financialProposalPriceChangeRequest.findUnique({
       where: { id: requestId },
       include: {
-        item: {
+        legacyItem: {
           include: {
             proposal: { select: { inquiryId: true, proposalNumber: true, version: true } },
+            inquiryItem: { select: { rowIndex: true, itemCode: true } },
+          },
+        },
+        item: {
+          include: {
+            option: { select: { inquiryId: true, deliveryTerm: true } },
             inquiryItem: { select: { rowIndex: true, itemCode: true } },
           },
         },
@@ -372,14 +400,24 @@ export class ProposalService {
     });
 
     if (decision === "approved") {
-      await this.prisma.financialProposalItem.update({
-        where: { id: request.financialProposalItemId },
-        data: { finalSalePrice: request.requestedPrice },
-      });
+      if (request.legacyItem) {
+        await this.prisma.financialProposalItem.update({
+          where: { id: request.financialProposalItemId! },
+          data: { finalSalePrice: request.requestedPrice },
+        });
+      } else if (request.item) {
+        await this.prisma.inquiryPricingOptionItem.update({
+          where: { id: request.pricingOptionItemId! },
+          data: { finalSalePrice: request.requestedPrice },
+        });
+      }
     }
 
-    const inquiryId = request.item.proposal.inquiryId;
-    const rowIndex = request.item.inquiryItem.rowIndex;
+    const inquiryId = request.legacyItem?.proposal.inquiryId ?? request.item!.option.inquiryId;
+    const rowIndex = request.legacyItem?.inquiryItem.rowIndex ?? request.item!.inquiryItem.rowIndex;
+    const contextLabel = request.legacyItem
+      ? `در پیشنهاد مالی نسخه ${request.legacyItem.proposal.version}`
+      : `در گزینه ${request.item!.option.deliveryTerm}`;
     await this.notifications.create({
       userId: request.requestedBy,
       type: "proposal_price_reduction_decided",
@@ -389,7 +427,7 @@ export class ProposalService {
           : `درخواست کاهش قیمت ردیف ${rowIndex} رد شد`,
       message:
         decision === "approved"
-          ? `قیمت جدید (${Number(request.requestedPrice)}) در پیشنهاد مالی نسخه ${request.item.proposal.version} اعمال شد`
+          ? `قیمت جدید (${Number(request.requestedPrice)}) ${contextLabel} اعمال شد`
           : `درخواست کاهش قیمت ردیف ${rowIndex} پذیرفته نشد — قیمت پایه بدون تغییر می‌مونه`,
       relatedEntityType: "inquiry",
       relatedEntityId: inquiryId,
@@ -400,8 +438,8 @@ export class ProposalService {
       authorId: currentUserId,
       text:
         decision === "approved"
-          ? `درخواست کاهش قیمت ردیف ${rowIndex} در پیشنهاد مالی تأیید شد`
-          : `درخواست کاهش قیمت ردیف ${rowIndex} در پیشنهاد مالی رد شد`,
+          ? `درخواست کاهش قیمت ردیف ${rowIndex} تأیید شد`
+          : `درخواست کاهش قیمت ردیف ${rowIndex} رد شد`,
       tag: "approval",
       metadata: { module: "proposal", action: `price_reduction_${decision}`, requestId },
     });
@@ -528,6 +566,94 @@ export class ProposalService {
     });
 
     return this.getProposal(inquiryId);
+  }
+
+  // ------------------------------------------------------------
+  // فاز ۶۰ (اصلاح) — هزینه‌های اضافی/گزینه‌های ترم تحویل/مارک‌آپ («تعیین حاشیه سود») به مرحله
+  // «انتخاب نهایی و قیمت‌گذاری» منتقل شدن — نگاه کنید به SelectionService/SelectionController
+  // (pricing-costs, pricing-options, .../markup). اینجا فقط اصلاح فروش می‌مونه: کاری که واقعاً
+  // در تب «پیشنهاد به مشتری» انجام می‌شه — مشاهده‌ی قیمت محاسبه‌شده بازرگانی (فقط‌خواندنی) و
+  // اعمال یک اصلاح (تخفیف/افزایش) روی همون قیمت، هرگز خودِ مارک‌آپ.
+  // ------------------------------------------------------------
+
+  /**
+   * اصلاح فروش — فقط salesAdjustmentAmount/reasonCode/note رو می‌نویسه؛ commercialCalculatedPrice
+   * (و markupPercent که تعیین‌کننده‌ی همون قیمته، و در مرحله انتخاب نهایی تعیین می‌شه) هرگز اینجا
+   * تغییر نمی‌کنه — دقیقاً الزام بخش ۱۲ اسپک («فروش نباید حاشیه سود بازرگانی رو تغییر بده»). اگه
+   * قیمت نهایی جدید کمتر از خط پایه‌ی مدیریت (inquiry_items.final_sale_price) باشه، همون گردش
+   * تأیید موجود (فاز ۳۵-ج) صدا زده می‌شه.
+   */
+  async saveSalesAdjustment(
+    inquiryId: string,
+    optionId: string,
+    dto: SaveSalesAdjustmentDto,
+    currentUserId: string,
+  ) {
+    await this.assertLocked(inquiryId);
+    const option = await this.prisma.inquiryPricingOption.findFirst({ where: { id: optionId, inquiryId } });
+    if (!option) {
+      throw new NotFoundException("گزینه ترم تحویل یافت نشد");
+    }
+    const item = await this.prisma.inquiryPricingOptionItem.findFirst({
+      where: { optionId, inquiryItemId: dto.inquiryItemId },
+    });
+    if (!item) {
+      throw new NotFoundException("قلم مورد نظر در این گزینه یافت نشد");
+    }
+    if (item.commercialCalculatedPrice == null) {
+      throw new BadRequestException(
+        "ابتدا باید قیمت بازرگانی این قلم در مرحله «انتخاب نهایی و قیمت‌گذاری» محاسبه شده باشه",
+      );
+    }
+
+    const finalSalePrice = Number(item.commercialCalculatedPrice) + dto.adjustmentAmount;
+    if (!Number.isFinite(finalSalePrice) || finalSalePrice < 0) {
+      throw new BadRequestException("قیمت نهایی حاصل نامعتبره");
+    }
+
+    const inquiryItem = await this.prisma.inquiryItem.findUnique({
+      where: { id: dto.inquiryItemId },
+      select: { finalSalePrice: true },
+    });
+    const baselinePrice = inquiryItem?.finalSalePrice != null ? Number(inquiryItem.finalSalePrice) : null;
+
+    if (baselinePrice != null && finalSalePrice < baselinePrice) {
+      await this.prisma.inquiryPricingOptionItem.update({
+        where: { id: item.id },
+        data: {
+          salesAdjustmentAmount: dto.adjustmentAmount,
+          salesAdjustmentReasonCode: dto.reasonCode,
+          salesAdjustmentNote: dto.note,
+          salesAdjustedBy: currentUserId,
+          salesAdjustedAt: new Date(),
+        },
+      });
+      await this.requestPriceReduction(
+        { pricingOptionItemId: item.id },
+        finalSalePrice,
+        currentUserId,
+        `گزینه ${option.deliveryTerm}`,
+      );
+      return this.selection.getPricingOptionOrThrow(inquiryId, optionId);
+    }
+
+    await this.prisma.inquiryPricingOptionItem.update({
+      where: { id: item.id },
+      data: {
+        salesAdjustmentAmount: dto.adjustmentAmount,
+        salesAdjustmentReasonCode: dto.reasonCode,
+        salesAdjustmentNote: dto.note,
+        salesAdjustedBy: currentUserId,
+        salesAdjustedAt: new Date(),
+        finalSalePrice,
+      },
+    });
+    await this.prisma.financialProposalPriceChangeRequest.updateMany({
+      where: { pricingOptionItemId: item.id, status: "pending" },
+      data: { status: "rejected", decidedAt: new Date() },
+    });
+
+    return this.selection.getPricingOptionOrThrow(inquiryId, optionId);
   }
 
   // ------------------------------------------------------------
@@ -660,7 +786,7 @@ export class ProposalService {
   // داده‌ی سند PDF/Word (فاز ۳۸) — مالی با قیمت، فنی بدون قیمت
   // ------------------------------------------------------------
 
-  async getDocumentData(inquiryId: string, kind: "financial" | "technical") {
+  async getDocumentData(inquiryId: string, kind: "financial" | "technical", deliveryOptionId?: string) {
     const inquiry = await this.prisma.inquiry.findUnique({
       where: { id: inquiryId },
       include: {
@@ -695,6 +821,69 @@ export class ProposalService {
     if (kind === "financial") {
       const proposal = await this.getCurrentFinancialOrThrow(inquiryId);
       const ourEntity = await this.resolveOurEntity(proposal.ourEntityId);
+
+      // فاز ۶۰ (اصلاح) — وقتی یک گزینه‌ی ترم تحویل مشخص درخواست شده، سند فقط از داده‌ی همون گزینه
+      // (که حالا در سطح خودِ استعلام زندگی می‌کنه، نه این نسخه‌ی پیشنهاد) ساخته می‌شه — نه ستون‌های
+      // تخت proposal.chosenDeliveryTerm/items — این تضمین ساختاریه که هیچ دیتایی بین گزینه‌ها
+      // (مثلاً CPT و DDP) قاطی نمی‌شه، نه صرفاً انضباط برنامه‌نویس.
+      if (deliveryOptionId) {
+        const option = await this.prisma.inquiryPricingOption.findFirst({
+          where: { id: deliveryOptionId, inquiryId },
+          include: { items: true },
+        });
+        if (!option) {
+          throw new NotFoundException("گزینه ترم تحویل یافت نشد");
+        }
+        const priceByItemIdForOption = new Map(option.items.map((i) => [i.inquiryItemId, i]));
+        const items = baseline.items
+          .filter((b) => priceByItemIdForOption.has(b.inquiryItemId))
+          .map((b) => {
+            const priced = priceByItemIdForOption.get(b.inquiryItemId)!;
+            return {
+              rowIndex: b.rowIndex,
+              partNumber: b.partNumber,
+              description: b.customerDescription,
+              builder: b.builder,
+              countryOfOrigin: b.countryOfOrigin,
+              quantity: b.quantity,
+              measurementUnit: b.measurementUnit,
+              isEquivalent: b.isEquivalent,
+              unitPrice: Number(priced.finalSalePrice),
+              totalPrice: Number(priced.finalSalePrice) * b.quantity,
+            };
+          });
+        return {
+          kind: "financial" as const,
+          proposalId: proposal.id,
+          proposalNumber: proposal.proposalNumber,
+          version: proposal.version,
+          preparedDate: proposal.preparedDate,
+          proposalValidityDate: proposal.proposalValidityDate,
+          currencyCode: option.currencyCode as string | null,
+          chosenDeliveryTerm: option.deliveryTerm as string | null,
+          deliveryDays: option.deliveryDays as number | null,
+          deliveryDaysUnit: option.deliveryDaysUnit as "day" | "week",
+          incotermLocation: option.incotermLocation as string | null,
+          shippingMethod: option.shippingMethod as string | null,
+          paymentTerms: option.paymentTerms,
+          exchangeRateFromCurrency: option.exchangeRateFromCurrency as string | null,
+          exchangeRateToCurrency: option.currencyCode as string | null,
+          exchangeRateValue: option.exchangeRateValue ? Number(option.exchangeRateValue) : null,
+          paymentMethod: proposal.paymentMethod as string | null,
+          partialShipmentAllowed: proposal.partialShipmentAllowed,
+          documentsChecklist: proposal.documentsChecklist as string[],
+          serviceTest: proposal.serviceTest as string | null,
+          serviceFieldService: proposal.serviceFieldService as string | null,
+          serviceDesign: proposal.serviceDesign as string | null,
+          warrantyTerms: proposal.warrantyTerms as string | null,
+          remarks: proposal.remarks as string | null,
+          ourEntity,
+          items,
+          totalAmount: items.reduce((sum, i) => sum + i.totalPrice, 0),
+          ...common,
+        };
+      }
+
       const priceByItemId = new Map(proposal.items.map((i) => [i.inquiryItemId, i]));
       // فاز ۵۳ — قیمت‌های سند نهایی مشتری شامل هزینه‌ی توزیع‌شده‌ی ترم تحویل انتخابی‌ان
       // (هم‌الگوی VAT/سایر هزینه‌های آفر تأمین‌کننده): هر ردیف سهم متناسب خودش رو می‌گیره

@@ -8,6 +8,7 @@ import { DeliveryTimeInput } from "../../components/ui/DeliveryTimeInput";
 import { InquiryDetail } from "./inquiry-types";
 import { useCurrencies } from "./rfqs-api";
 import { useSelection, useSelectionMutations } from "./selection-api";
+import { PricingWorkspace } from "./PricingWorkspace";
 import {
   DELIVERY_TERMS,
   DeliveryTerm,
@@ -502,6 +503,19 @@ export function SelectionTab({ inquiry }: { inquiry: InquiryDetail }) {
           </div>
         );
       })}
+
+      {/* فاز ۶۰ (اصلاح — بازخورد کاربر) — موتور قیمت‌گذاری بازرگانی مبتنی بر Incoterm («تعیین
+      حاشیه سود» به تفکیک هر ترم تحویل) — دقیقاً همین‌جاست که باید مدیریت بشه، نه در تب «پیشنهاد
+      به مشتری». جدا از بخش ساده‌ی «گزینه‌های ترم تحویل به مشتری» زیر که مسیر تخت/قدیمی رو
+      پشتیبانی می‌کنه. */}
+      {canSetMarkup && (
+        <PricingWorkspace
+          inquiry={inquiry}
+          canManagePricing={canSetMarkup}
+          defaultCurrencyCode={baseCurrencyDraft || totalsEntries[0]?.[0] || ""}
+          locked={locked}
+        />
+      )}
 
       {/* گزینه‌های ترم تحویل */}
       <div className="rounded-xl p-5 bg-surface border border-border shadow-card">

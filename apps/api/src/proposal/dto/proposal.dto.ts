@@ -185,3 +185,35 @@ export class ReviseFinancialDto {
   @Min(0.000001, { message: "نرخ تبدیل باید مثبت باشه" })
   exchangeRate?: number;
 }
+
+// ============================================================
+// فاز ۶۰ (اصلاح) — قیمت‌گذاری بازرگانی (هزینه‌های اضافی/گزینه‌های ترم تحویل/مارک‌آپ) به تب
+// «انتخاب نهایی و قیمت‌گذاری» منتقل شد (نگاه کنید به selection/dto/selection.dto.ts). اینجا
+// فقط چیزی می‌مونه که واقعاً کار فروشه: اصلاح قیمت نهایی نسبت به قیمت محاسبه‌شده بازرگانی.
+// ============================================================
+
+/** SALES_ADJUSTMENT_REASONS — طبق بخش ۱۳ اسپک (دلایل پیشنهادی اصلاح فروش) */
+export const SALES_ADJUSTMENT_REASONS = [
+  "customer_negotiation",
+  "market_price",
+  "competitive_pricing",
+  "strategic_customer",
+  "management_discount",
+  "other",
+] as const;
+
+export class SaveSalesAdjustmentDto {
+  @IsUUID()
+  inquiryItemId!: string;
+
+  @IsNumber()
+  adjustmentAmount!: number;
+
+  @IsOptional()
+  @IsIn(SALES_ADJUSTMENT_REASONS, { message: "دلیل اصلاح قیمت نامعتبره" })
+  reasonCode?: (typeof SALES_ADJUSTMENT_REASONS)[number];
+
+  @IsOptional()
+  @IsString()
+  note?: string;
+}

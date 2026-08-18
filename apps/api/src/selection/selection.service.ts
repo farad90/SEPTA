@@ -10,7 +10,11 @@ import { ActivitiesService } from "../activities/activities.service";
 import {
   DeliveryOptionDto,
   SaveSelectionDto,
+  SavePricingCostDto,
+  AddPricingOptionDto,
+  SavePricingOptionMarkupDto,
 } from "./dto/selection.dto";
+import { priceOptionItems, type DistributableCost } from "../pricing/pricing-engine";
 
 interface OfferComputationRow {
   offerItemId: string;
@@ -521,6 +525,429 @@ export class SelectionService {
     });
 
     return this.getSelection(inquiryId);
+  }
+
+  // ------------------------------------------------------------
+  // فاز ۶۰ (اصلاح — بازخورد کاربر) — قیمت‌گذاری بازرگانی به تفکیک ترم تحویل («تعیین حاشیه سود»)
+  // دقیقاً همین‌جا (مرحله «انتخاب نهایی و قیمت‌گذاری») اتفاق می‌افته، نه در تب پیشنهاد به مشتری.
+  // چون InquiryPricingOption/InquiryPricingOptionItem به خودِ Inquiry وصل‌ان (نه به یک نسخه
+  // پیشنهاد که فقط بعد از قفل شدن این مرحله ساخته می‌شه)، این بخش کاملاً مستقل از هر پیشنهادیه؛
+  // وقتی بعداً پیشنهاد به مشتری تولید می‌شه فقط از این جدول‌ها می‌خونه.
+  // ------------------------------------------------------------
+
+  async listPricingCosts(inquiryId: string) {
+    const rows = await this.prisma.inquiryPricingCost.findMany({
+      where: { inquiryId },
+      orderBy: { createdAt: "asc" },
+    });
+    return rows.map((r) => this.formatPricingCost(r));
+  }
+
+  async createPricingCost(inquiryId: string, dto: SavePricingCostDto, currentUserId: string) {
+    await this.assertNotLocked(inquiryId);
+    const currency = await this.prisma.currency.findUnique({ where: { currencyCode: dto.currencyCode } });
+    if (!currency) {
+      throw new BadRequestException("ارز نامعتبره");
+    }
+    const row = await this.prisma.inquiryPricingCost.create({
+      data: {
+        inquiryId,
+        description: dto.description,
+        amount: dto.amount,
+        currencyCode: dto.currencyCode,
+        includeInMarginBase: dto.includeInMarginBase ?? true,
+        deliveryTerm: dto.deliveryTerm,
+        createdBy: currentUserId,
+      },
+    });
+    await this.activityLog.log({
+      inquiryId,
+      authorId: currentUserId,
+      text: `هزینه اضافی «${dto.description}» به قیمت‌گذاری این پرونده اضافه شد`,
+      tag: "general",
+      metadata: { module: "selection", action: "pricing_cost_added", costId: row.id },
+    });
+    return this.formatPricingCost(row);
+  }
+
+  async updatePricingCost(inquiryId: string, costId: string, dto: SavePricingCostDto) {
+    await this.assertNotLocked(inquiryId);
+    const existing = await this.prisma.inquiryPricingCost.findFirst({ where: { id: costId, inquiryId } });
+    if (!existing) {
+      throw new NotFoundException("هزینه اضافی یافت نشد");
+    }
+    const currency = await this.prisma.currency.findUnique({ where: { currencyCode: dto.currencyCode } });
+    if (!currency) {
+      throw new BadRequestException("ارز نامعتبره");
+    }
+    const row = await this.prisma.inquiryPricingCost.update({
+      where: { id: costId },
+      data: {
+        description: dto.description,
+        amount: dto.amount,
+        currencyCode: dto.currencyCode,
+        includeInMarginBase: dto.includeInMarginBase ?? existing.includeInMarginBase,
+        deliveryTerm: dto.deliveryTerm ?? null,
+      },
+    });
+    return this.formatPricingCost(row);
+  }
+
+  async deletePricingCost(inquiryId: string, costId: string) {
+    await this.assertNotLocked(inquiryId);
+    const existing = await this.prisma.inquiryPricingCost.findFirst({ where: { id: costId, inquiryId } });
+    if (!existing) {
+      throw new NotFoundException("هزینه اضافی یافت نشد");
+    }
+    await this.prisma.inquiryPricingCost.delete({ where: { id: costId } });
+    return { success: true };
+  }
+
+  private formatPricingCost(row: {
+    id: string;
+    description: string;
+    amount: unknown;
+    currencyCode: string;
+    includeInMarginBase: boolean;
+    deliveryTerm: string | null;
+  }) {
+    return {
+      id: row.id,
+      description: row.description,
+      amount: Number(row.amount),
+      currencyCode: row.currencyCode,
+      includeInMarginBase: row.includeInMarginBase,
+      deliveryTerm: row.deliveryTerm,
+    };
+  }
+
+  /** هزینه‌های اضافی قابل‌اعمال روی یک گزینه‌ی مشخص — همون‌هایی که deliveryTerm=NULL (روی همه) یا دقیقاً همون ترم رو دارن */
+  private async getApplicablePricingCosts(inquiryId: string, deliveryTerm: string, currencyCode: string) {
+    const rows = await this.prisma.inquiryPricingCost.findMany({
+      where: { inquiryId, OR: [{ deliveryTerm: null }, { deliveryTerm }] },
+    });
+    const mismatched = rows.filter((r) => r.currencyCode !== currencyCode);
+    if (mismatched.length > 0) {
+      throw new BadRequestException(
+        `هزینه(های) «${mismatched.map((r) => r.description).join("، ")}» به ارز ${currencyCode} (ارز این گزینه) ثبت نشدن — ابتدا ارزشون رو هماهنگ کن`,
+      );
+    }
+    const costs: DistributableCost[] = rows.map((r) => ({
+      amount: Number(r.amount),
+      includeInMarginBase: r.includeInMarginBase,
+    }));
+    const snapshot = rows.map((r) => ({
+      description: r.description,
+      amount: Number(r.amount),
+      currencyCode: r.currencyCode,
+      includeInMarginBase: r.includeInMarginBase,
+      deliveryTerm: r.deliveryTerm,
+    }));
+    return { costs, snapshot };
+  }
+
+  /** هزینه خرید (تبدیل‌شده به ارز مبنا اگه فعال باشه) + تعداد + مارک‌آپ پایه هر قلم منتخب — بدون هیچ وابستگی به پیشنهاد */
+  private async getPurchaseCostBasis(inquiryId: string) {
+    const state = await this.getSelection(inquiryId);
+    const baseCurrency = state.selectionBaseCurrencyCode as string | null;
+    const items = (state.items as Array<Record<string, unknown>>)
+      .filter((i) => !!i.selectedOfferItemId)
+      .map((i) => {
+        const offers = i.offers as Array<Record<string, unknown>>;
+        const chosen = offers.find((o) => o.offerItemId === i.selectedOfferItemId);
+        const effectivePrice =
+          baseCurrency && chosen?.effectivePriceInBaseCurrency != null
+            ? (chosen.effectivePriceInBaseCurrency as number)
+            : ((chosen?.effectivePrice as number) ?? 0);
+        return {
+          inquiryItemId: i.id as string,
+          rowIndex: i.rowIndex as number,
+          partNumber: i.partNumber as string | null,
+          description: i.description as string,
+          quantity: i.quantity as number,
+          effectivePrice,
+          baselineMarkupPercent: i.markupPercent as number | null,
+        };
+      });
+    return {
+      items,
+      dominantCurrency: baseCurrency ?? this.pickMajorityCurrency(state.totalsByCurrency as Record<string, number>),
+    };
+  }
+
+  private pickMajorityCurrency(totalsByCurrency: Record<string, number>): string {
+    const entries = Object.entries(totalsByCurrency);
+    if (entries.length === 0) return "EUR";
+    entries.sort((a, b) => b[1] - a[1]);
+    return entries[0][0];
+  }
+
+  async listPricingOptions(inquiryId: string) {
+    const options = await this.prisma.inquiryPricingOption.findMany({
+      where: { inquiryId },
+      include: {
+        items: { include: { inquiryItem: { select: { rowIndex: true, partNumber: true, description: true } } } },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    return options.map((o) => this.formatPricingOption(o));
+  }
+
+  async addPricingOption(inquiryId: string, dto: AddPricingOptionDto, currentUserId: string) {
+    await this.assertNotLocked(inquiryId);
+    const currency = await this.prisma.currency.findUnique({ where: { currencyCode: dto.currencyCode } });
+    if (!currency) {
+      throw new BadRequestException("ارز نامعتبره");
+    }
+    const existingOption = await this.prisma.inquiryPricingOption.findFirst({
+      where: { inquiryId, deliveryTerm: dto.deliveryTerm },
+    });
+    if (existingOption) {
+      throw new BadRequestException(`گزینه ترم تحویل ${dto.deliveryTerm} از قبل روی این پرونده وجود داره`);
+    }
+
+    const basis = await this.getPurchaseCostBasis(inquiryId);
+    if (basis.items.length === 0) {
+      throw new BadRequestException("هیچ قلمی آفر منتخب نداره — اول حداقل یک قلم رو در همین مرحله انتخاب کن");
+    }
+
+    const isCurrencyChange = dto.currencyCode !== basis.dominantCurrency;
+    if (isCurrencyChange && (!dto.exchangeRate || dto.exchangeRate <= 0)) {
+      throw new BadRequestException(
+        `چون ارز این گزینه (${dto.currencyCode}) با ارز مبنای قیمت‌گذاری (${basis.dominantCurrency}) فرق داره، نرخ تبدیل الزامیه`,
+      );
+    }
+    const rate = isCurrencyChange ? dto.exchangeRate! : 1;
+
+    const { costs, snapshot } = await this.getApplicablePricingCosts(inquiryId, dto.deliveryTerm, dto.currencyCode);
+
+    const optionId = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.inquiryPricingOption.create({
+        data: {
+          inquiryId,
+          deliveryTerm: dto.deliveryTerm,
+          incotermLocation: dto.incotermLocation,
+          shippingMethod: dto.shippingMethod,
+          deliveryDays: dto.deliveryDays,
+          deliveryDaysUnit: dto.deliveryDaysUnit ?? "day",
+          paymentTerms: dto.paymentTerms,
+          currencyCode: dto.currencyCode,
+          exchangeRateFromCurrency: isCurrencyChange ? basis.dominantCurrency : null,
+          exchangeRateValue: isCurrencyChange ? rate : null,
+          defaultMarkupPercent: dto.defaultMarkupPercent ?? null,
+          isPrimary: false,
+        },
+      });
+
+      const markupByItemId = new Map(
+        basis.items.map((item) => [
+          item.inquiryItemId,
+          dto.defaultMarkupPercent ?? item.baselineMarkupPercent ?? 0,
+        ]),
+      );
+      const priced = priceOptionItems(
+        basis.items.map((item) => ({
+          inquiryItemId: item.inquiryItemId,
+          purchaseCost: item.effectivePrice * rate,
+          quantity: item.quantity,
+          markupPercent: markupByItemId.get(item.inquiryItemId)!,
+        })),
+        costs,
+      );
+
+      for (const p of priced) {
+        await tx.inquiryPricingOptionItem.create({
+          data: {
+            optionId: created.id,
+            inquiryItemId: p.inquiryItemId,
+            purchasePrice: p.marginBaseAmount.toNumber(),
+            markupPercent: markupByItemId.get(p.inquiryItemId)!,
+            finalSalePrice: p.finalSalePrice.toNumber(),
+            commercialCalculatedPrice: p.commercialCalculatedPrice.toNumber(),
+            commercialPricedBy: currentUserId,
+            commercialPricedAt: new Date(),
+            marginBaseCostSnapshot: snapshot,
+          },
+        });
+      }
+
+      const marginBaseTotal = priced.reduce((sum, p) => sum + p.marginBaseAmount.toNumber(), 0);
+      await tx.inquiryPricingOption.update({
+        where: { id: created.id },
+        data: { marginBaseAmount: marginBaseTotal },
+      });
+
+      return created.id;
+    });
+
+    await this.activityLog.log({
+      inquiryId,
+      authorId: currentUserId,
+      text: `گزینه ترم تحویل ${dto.deliveryTerm} به قیمت‌گذاری این پرونده اضافه شد`,
+      tag: "general",
+      metadata: { module: "selection", action: "pricing_option_added", deliveryTerm: dto.deliveryTerm },
+    });
+
+    return this.getPricingOptionOrThrow(inquiryId, optionId);
+  }
+
+  async removePricingOption(inquiryId: string, optionId: string) {
+    await this.assertNotLocked(inquiryId);
+    const option = await this.prisma.inquiryPricingOption.findFirst({ where: { id: optionId, inquiryId } });
+    if (!option) {
+      throw new NotFoundException("گزینه ترم تحویل یافت نشد");
+    }
+    const optionCount = await this.prisma.inquiryPricingOption.count({ where: { inquiryId } });
+    if (optionCount <= 1) {
+      throw new BadRequestException("حذف تنها گزینه ترم تحویل باقی‌مانده ممکن نیست");
+    }
+    await this.prisma.inquiryPricingOption.delete({ where: { id: optionId } });
+    return { success: true };
+  }
+
+  /** «اعمال به همه» + override تک‌تک اقلام — فقط مارک‌آپ/قیمت محاسبه‌شده بازرگانی رو می‌نویسه، هرگز اصلاح فروش رو */
+  async saveMarkup(inquiryId: string, optionId: string, dto: SavePricingOptionMarkupDto, currentUserId: string) {
+    await this.assertNotLocked(inquiryId);
+    const option = await this.prisma.inquiryPricingOption.findFirst({
+      where: { id: optionId, inquiryId },
+      include: { items: true },
+    });
+    if (!option) {
+      throw new NotFoundException("گزینه ترم تحویل یافت نشد");
+    }
+
+    const overrideByItemId = new Map((dto.items ?? []).map((i) => [i.inquiryItemId, i.markupPercent]));
+    const { costs, snapshot } = await this.getApplicablePricingCosts(inquiryId, option.deliveryTerm, option.currencyCode);
+
+    const quantities = await this.prisma.inquiryItem.findMany({
+      where: { id: { in: option.items.map((i) => i.inquiryItemId) } },
+      select: { id: true, quantity: true },
+    });
+    const quantityByItemId = new Map(quantities.map((q) => [q.id, Number(q.quantity)]));
+
+    const priced = priceOptionItems(
+      option.items.map((item) => ({
+        inquiryItemId: item.inquiryItemId,
+        purchaseCost: Number(item.purchasePrice ?? 0),
+        quantity: quantityByItemId.get(item.inquiryItemId) ?? 1,
+        markupPercent:
+          overrideByItemId.get(item.inquiryItemId) ?? dto.defaultMarkupPercent ?? Number(item.markupPercent),
+        salesAdjustmentAmount: Number(item.salesAdjustmentAmount),
+      })),
+      costs,
+    );
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const p of priced) {
+        const item = option.items.find((i) => i.inquiryItemId === p.inquiryItemId)!;
+        const markupPercent =
+          overrideByItemId.get(p.inquiryItemId) ?? dto.defaultMarkupPercent ?? Number(item.markupPercent);
+        await tx.inquiryPricingOptionItem.update({
+          where: { id: item.id },
+          data: {
+            markupPercent,
+            commercialCalculatedPrice: p.commercialCalculatedPrice.toNumber(),
+            commercialPricedBy: currentUserId,
+            commercialPricedAt: new Date(),
+            finalSalePrice: p.finalSalePrice.toNumber(),
+            marginBaseCostSnapshot: snapshot,
+          },
+        });
+      }
+      await tx.inquiryPricingOption.update({
+        where: { id: optionId },
+        data: {
+          ...(dto.defaultMarkupPercent !== undefined ? { defaultMarkupPercent: dto.defaultMarkupPercent } : {}),
+          marginBaseAmount: priced.reduce((sum, p) => sum + p.marginBaseAmount.toNumber(), 0),
+        },
+      });
+    });
+
+    await this.activityLog.log({
+      inquiryId,
+      authorId: currentUserId,
+      text: `قیمت‌گذاری بازرگانی گزینه ${option.deliveryTerm} به‌روزرسانی شد`,
+      tag: "general",
+      metadata: { module: "selection", action: "pricing_option_markup_saved", deliveryTerm: option.deliveryTerm },
+    });
+
+    return this.getPricingOptionOrThrow(inquiryId, optionId);
+  }
+
+  /** عمومی — ProposalService بعد از ثبت اصلاح فروش، همین قالب رو برای پاسخ برمی‌گردونه */
+  async getPricingOptionOrThrow(inquiryId: string, optionId: string) {
+    const option = await this.prisma.inquiryPricingOption.findFirst({
+      where: { id: optionId, inquiryId },
+      include: {
+        items: { include: { inquiryItem: { select: { rowIndex: true, partNumber: true, description: true } } } },
+      },
+    });
+    if (!option) {
+      throw new NotFoundException("گزینه ترم تحویل یافت نشد");
+    }
+    return this.formatPricingOption(option);
+  }
+
+  private formatPricingOption(option: {
+    id: string;
+    deliveryTerm: string;
+    incotermLocation: string | null;
+    shippingMethod: string | null;
+    deliveryDays: number;
+    deliveryDaysUnit: string;
+    paymentTerms: string | null;
+    currencyCode: string;
+    marginBaseAmount: unknown;
+    defaultMarkupPercent: unknown;
+    isPrimary: boolean;
+    items: Array<{
+      id: string;
+      inquiryItemId: string;
+      markupPercent: unknown;
+      commercialCalculatedPrice: unknown;
+      commercialPricedBy: string | null;
+      commercialPricedAt: Date | null;
+      salesAdjustmentAmount: unknown;
+      salesAdjustmentReasonCode: string | null;
+      salesAdjustmentNote: string | null;
+      salesAdjustedBy: string | null;
+      salesAdjustedAt: Date | null;
+      finalSalePrice: unknown;
+      marginBaseCostSnapshot: unknown;
+      inquiryItem?: { rowIndex: number; partNumber: string | null; description: string };
+    }>;
+  }) {
+    return {
+      id: option.id,
+      deliveryTerm: option.deliveryTerm,
+      incotermLocation: option.incotermLocation,
+      shippingMethod: option.shippingMethod,
+      deliveryDays: option.deliveryDays,
+      deliveryDaysUnit: option.deliveryDaysUnit,
+      paymentTerms: option.paymentTerms,
+      currencyCode: option.currencyCode,
+      marginBaseAmount: Number(option.marginBaseAmount),
+      defaultMarkupPercent: option.defaultMarkupPercent != null ? Number(option.defaultMarkupPercent) : null,
+      isPrimary: option.isPrimary,
+      items: option.items.map((i) => ({
+        id: i.id,
+        inquiryItemId: i.inquiryItemId,
+        rowIndex: i.inquiryItem?.rowIndex ?? null,
+        partNumber: i.inquiryItem?.partNumber ?? null,
+        description: i.inquiryItem?.description ?? null,
+        markupPercent: Number(i.markupPercent),
+        commercialCalculatedPrice: i.commercialCalculatedPrice != null ? Number(i.commercialCalculatedPrice) : null,
+        commercialPricedBy: i.commercialPricedBy,
+        commercialPricedAt: i.commercialPricedAt,
+        salesAdjustmentAmount: Number(i.salesAdjustmentAmount),
+        salesAdjustmentReasonCode: i.salesAdjustmentReasonCode,
+        salesAdjustmentNote: i.salesAdjustmentNote,
+        salesAdjustedBy: i.salesAdjustedBy,
+        salesAdjustedAt: i.salesAdjustedAt,
+        finalSalePrice: Number(i.finalSalePrice),
+        marginBaseCostSnapshot: i.marginBaseCostSnapshot,
+      })),
+    };
   }
 
   // ------------------------------------------------------------

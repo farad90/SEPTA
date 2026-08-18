@@ -16,7 +16,7 @@ export class ProposalDocumentsController {
     @Param("id", ParseUUIDPipe) id: string,
     @Query() query: GenerateProposalDocumentDto,
   ) {
-    return this.service.generate(id, "financial", query.format, query.lang);
+    return this.service.generate(id, "financial", query.format, query.lang, query.deliveryOptionId);
   }
 
   @RequirePermissions("proposal.generate")

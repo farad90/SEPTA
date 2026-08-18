@@ -50,6 +50,8 @@ export interface InquiryListRow {
   _count: { items: number };
   /** برندهای یکتای درخواست‌شده در این پرونده (از inquiry_items.builder) — برای ستون «برندها» در لیست */
   builders: string[];
+  /** تأمین‌کننده(های) یکتای آفر منتخب اقلام این پرونده — فقط بعد از مرحله انتخاب نهایی پر می‌شه */
+  suppliers: string[];
   /** ارزش کل پرونده به قیمت فروش نهایی (final_sale_price × مقدار)، به تفکیک ارز — بدون تبدیل نرخ */
   saleValueByCurrency: Record<string, number>;
 
@@ -104,6 +106,7 @@ export interface InquiryDetail
     InquiryListRow,
     | "_count"
     | "builders"
+    | "suppliers"
     | "saleValueByCurrency"
     | "poNumbers"
     | "purchaseValueByCurrency"

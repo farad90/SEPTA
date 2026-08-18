@@ -36,7 +36,15 @@ const LIST_INCLUDE = {
       finalSalePrice: true,
       // فاز ۵۹ — price هم اضافه شد (قبلاً فقط currencyCode) تا «قیمت خرید»/«سود تقریبی»
       // بدون Join جدا به order_items، از همون آفر منتخبی که ارزش استعلام رو هم می‌سازه محاسبه بشه
-      selectedOfferItem: { select: { currencyCode: true, price: true } },
+      // فاز ۶۰ — تأمین‌کننده(های) پرونده، برای ستون «تأمین‌کننده» لیست، از همون زنجیره‌ی
+      // آفر منتخب ← RFQ ← تأمین‌کننده — بدون Join جدا (هم‌الگوی builder که از قبل اینجاست)
+      selectedOfferItem: {
+        select: {
+          currencyCode: true,
+          price: true,
+          offer: { select: { rfq: { select: { supplier: { select: { companyName: true } } } } } },
+        },
+      },
     },
   },
   // فاز ۵۹ — فقط برای ستون «شماره PO»؛ قیمت خرید/سود عمداً از اینجا نمیان (نگاه کنید به یادداشت
@@ -100,6 +108,25 @@ function extractBuilders(items: ListRowItem[] | undefined): string[] {
   const result: string[] = [];
   for (const item of items ?? []) {
     const value = item.builder?.trim();
+    if (value && !seen.has(value)) {
+      seen.add(value);
+      result.push(value);
+    }
+  }
+  return result;
+}
+
+/**
+ * فاز ۶۰ — تأمین‌کننده(های) یکتای آفر منتخب هر قلم، به ترتیب اولین ظهور — برای ستون
+ * «تأمین‌کننده» لیست. فقط قلم‌هایی که آفرشون انتخاب و RFQ/تأمین‌کننده‌اش قابل ردیابی‌ست
+ * (یعنی از مرحله «انتخاب نهایی» گذشتن) اینجا حساب می‌شن — قبل از اون، هنوز تأمین‌کننده‌ای
+ * قطعی نشده. دقیقاً هم‌الگوی extractBuilders، بدون نیاز به Join/کوئری اضافه.
+ */
+function extractSuppliers(items: ListRowItem[] | undefined): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of items ?? []) {
+    const value = item.selectedOfferItem?.offer?.rfq?.supplier?.companyName?.trim();
     if (value && !seen.has(value)) {
       seen.add(value);
       result.push(value);
@@ -473,6 +500,7 @@ export class InquiriesService {
       stageLabel:
         (activity?.relatedStageCode && STAGE_CODE_LABEL[activity.relatedStageCode]) || deriveStageLabel(row),
       builders: extractBuilders(rowItems),
+      suppliers: extractSuppliers(rowItems),
       saleValueByCurrency,
       // فاز ۵۹ — هر سه فیلد زیر عمداً کاملاً از پاسخ حذف می‌شن (نه null) وقتی کاربر دسترسی
       // مربوطه رو نداره — دقیقاً همون الگوی حذف purchasePrice در فاز ۳۵-ب (proposal.service.ts)

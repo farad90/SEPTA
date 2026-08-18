@@ -1,4 +1,4 @@
-import { DeliveryTerm } from "./selection-types";
+import { DeliveryTerm, IncotermOption } from "./selection-types";
 
 // فاز ۵۲ — کلیدهای ثابت چک‌لیست مدارک (باید با PROPOSAL_DOCUMENT_CHECKLIST_KEYS بک‌اند هم‌خوان بمونه)
 export const PROPOSAL_DOCUMENT_CHECKLIST_ITEMS = [
@@ -112,11 +112,16 @@ export interface ProposalDeliveryOption {
   deliveryDays: number;
 }
 
+// فاز ۶۰ (اصلاح — بازخورد کاربر) — گزینه‌های ترم تحویل («یک پیشنهاد، چند Incoterm») + هزینه‌های
+// اضافی + مارک‌آپ («تعیین حاشیه سود») حالا در selection-types.ts تعریف می‌شن، چون این‌ها در مرحله
+// «انتخاب نهایی و قیمت‌گذاری» مدیریت می‌شن، نه اینجا — این تب فقط IncotermOption رو فقط‌خواندنی
+// می‌خونه (financial.pricingDeliveryOptions پایین) و برای اصلاح فروش استفاده می‌کنه.
+
 export interface ProposalState {
   inquiryId: string;
   managerNoteToSales: string | null;
   baselineItems: ProposalBaselineItem[];
   deliveryOptions: ProposalDeliveryOption[];
-  financial: FinancialProposal;
+  financial: FinancialProposal & { pricingDeliveryOptions: IncotermOption[] };
   technical: TechnicalProposal;
 }

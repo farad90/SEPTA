@@ -8,7 +8,7 @@ import { DeliveryTimeInput } from "../../components/ui/DeliveryTimeInput";
 import { InquiryDetail } from "./inquiry-types";
 import { downloadFile } from "./inquiries-api";
 import { useCurrencies, useOurEntities } from "./rfqs-api";
-import { DELIVERY_TERMS, DeliveryTerm } from "./selection-types";
+import { DELIVERY_TERMS, DeliveryTerm, IncotermOption, SALES_ADJUSTMENT_REASONS } from "./selection-types";
 import { useProposal, useProposalHistory, useProposalMutations } from "./proposal-api";
 import {
   FinancialProposal,
@@ -180,6 +180,278 @@ function HistoryModal({
           <GhostButton onClick={onClose}>بستن</GhostButton>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------
+// فاز ۶۰ (اصلاح — بازخورد کاربر) — نمایش فقط‌خواندنی قیمت بازرگانی هر گزینه Incoterm + اصلاح
+// فروش (Sales Adjustment) + تولید سند. ⚠️ مارک‌آپ/هزینه‌های اضافی/گزینه‌های ترم تحویل اینجا هرگز
+// مدیریت نمی‌شن — اون‌ها منحصراً در تب «انتخاب نهایی و قیمت‌گذاری» (SelectionTab) هستن؛ این
+// کامپوننت فقط نتیجه‌ی محاسبه‌شده رو می‌خونه و روش یک اصلاح نهایی (تخفیف/افزایش) اعمال می‌کنه.
+// ------------------------------------------------------------
+
+function SalesAdjustmentRow({
+  item,
+  optionId,
+  optionCurrency,
+  inquiryId,
+  canAdjustSales,
+}: {
+  item: IncotermOption["items"][number];
+  optionId: string;
+  optionCurrency: string;
+  inquiryId: string;
+  canAdjustSales: boolean;
+}) {
+  const mutations = useProposalMutations(inquiryId);
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [adjustAmount, setAdjustAmount] = useState(String(item.salesAdjustmentAmount));
+  const [adjustReason, setAdjustReason] = useState(item.salesAdjustmentReasonCode ?? "");
+  const [adjustNote, setAdjustNote] = useState(item.salesAdjustmentNote ?? "");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setAdjustAmount(String(item.salesAdjustmentAmount));
+    setAdjustReason(item.salesAdjustmentReasonCode ?? "");
+    setAdjustNote(item.salesAdjustmentNote ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.salesAdjustmentAmount, item.salesAdjustmentReasonCode, item.salesAdjustmentNote]);
+
+  async function saveAdjustment() {
+    setErrorMsg(null);
+    const amount = parseFloat(adjustAmount || "0");
+    if (Number.isNaN(amount)) {
+      setErrorMsg("مبلغ اصلاح نامعتبره");
+      return;
+    }
+    try {
+      await mutations.saveSalesAdjustment.mutateAsync({
+        optionId,
+        body: {
+          inquiryItemId: item.inquiryItemId,
+          adjustmentAmount: amount,
+          reasonCode: (adjustReason || undefined) as never,
+          note: adjustNote || undefined,
+        },
+      });
+      setAdjustOpen(false);
+    } catch (err) {
+      setErrorMsg(extractError(err, "ثبت اصلاح قیمت ناموفق بود"));
+    }
+  }
+
+  const isPendingApproval = item.finalSalePrice === item.commercialCalculatedPrice && item.salesAdjustmentAmount !== 0;
+
+  return (
+    <div className="rounded-lg bg-bg overflow-hidden">
+      <div className="p-3 space-y-2">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="font-mono text-textSecondary" dir="ltr">
+            {item.rowIndex != null ? `ردیف ${item.rowIndex}` : ""} {item.partNumber ? `— PN: ${item.partNumber}` : ""}
+          </span>
+          <span className="text-textPrimary flex-1 min-w-[120px] truncate" title={item.description ?? ""}>
+            {item.description}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-col gap-0.5 text-xs" dir="ltr">
+            <span className="text-textSecondary">
+              قیمت بازرگانی (فقط‌خواندنی):{" "}
+              <span className="font-mono text-textPrimary font-medium">
+                {item.commercialCalculatedPrice != null ? fmt(item.commercialCalculatedPrice) : "—"} {optionCurrency}
+              </span>
+            </span>
+            {item.salesAdjustmentAmount !== 0 && (
+              <span className="text-textSecondary">
+                اصلاح فروش:{" "}
+                <span className={`font-mono font-medium ${item.salesAdjustmentAmount < 0 ? "text-danger" : "text-success"}`}>
+                  {item.salesAdjustmentAmount > 0 ? "+" : ""}
+                  {fmt(item.salesAdjustmentAmount)} {optionCurrency}
+                </span>
+              </span>
+            )}
+            <span className="text-textPrimary font-semibold">
+              قیمت نهایی مشتری: <span className="font-mono">{fmt(item.finalSalePrice)} {optionCurrency}</span>
+            </span>
+            {isPendingApproval && (
+              <span className="text-warning text-[10.5px]">در انتظار تأیید مدیر برای کاهش قیمت</span>
+            )}
+          </div>
+
+          {canAdjustSales && (
+            <GhostButton type="button" onClick={() => setAdjustOpen((v) => !v)} className="py-1.5 px-2.5 mr-auto">
+              اصلاح قیمت فروش
+            </GhostButton>
+          )}
+        </div>
+
+        {errorMsg && <p className="text-xs text-danger">{errorMsg}</p>}
+
+        {adjustOpen && (
+          <div className="rounded-lg p-2.5 bg-surface border border-border space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[10.5px] text-textSecondary mb-1">مبلغ اصلاح (مثبت یا منفی)</label>
+                <TextInput value={adjustAmount} onChange={(e) => setAdjustAmount(e.target.value)} dir="ltr" className="font-mono text-xs" />
+              </div>
+              <Select value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)}>
+                <option value="">دلیل اصلاح (اختیاری)...</option>
+                {SALES_ADJUSTMENT_REASONS.map((r) => (
+                  <option key={r.key} value={r.key}>
+                    {r.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <TextArea
+              placeholder="یادداشت آزاد (اختیاری)"
+              value={adjustNote}
+              onChange={(e) => setAdjustNote(e.target.value)}
+              rows={2}
+            />
+            <div className="flex items-center gap-2">
+              <PrimaryButton type="button" onClick={saveAdjustment} disabled={mutations.saveSalesAdjustment.isPending}>
+                ثبت اصلاح قیمت
+              </PrimaryButton>
+              <GhostButton type="button" onClick={() => setAdjustOpen(false)}>
+                انصراف
+              </GhostButton>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CustomerPricingOptions({
+  inquiry,
+  options,
+  canAdjustSales,
+}: {
+  inquiry: InquiryDetail;
+  options: IncotermOption[];
+  canAdjustSales: boolean;
+}) {
+  const mutations = useProposalMutations(inquiry.id);
+  const [activeId, setActiveId] = useState<string | null>(options[0]?.id ?? null);
+  const [docFormat, setDocFormat] = useState<"pdf" | "xlsx">("pdf");
+  const [docLang, setDocLang] = useState<"fa" | "en">("fa");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!options.some((o) => o.id === activeId)) {
+      setActiveId(options[0]?.id ?? null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options.map((o) => o.id).join(",")]);
+
+  if (options.length === 0) {
+    return (
+      <div className="rounded-xl p-5 bg-surface border border-border shadow-card">
+        <p className="text-sm font-semibold text-textPrimary mb-1">قیمت‌گذاری بازرگانی به تفکیک ترم تحویل</p>
+        <p className="text-xs text-textSecondary">
+          هنوز هیچ گزینه ترم تحویل قیمت‌گذاری‌شده‌ای وجود نداره. تعیین حاشیه سود («مارک‌آپ») و افزودن گزینه‌های Incoterm
+          در تب «انتخاب نهایی و قیمت‌گذاری» انجام می‌شه.
+        </p>
+      </div>
+    );
+  }
+
+  const activeOption = options.find((o) => o.id === activeId) ?? null;
+
+  async function generateOptionDoc() {
+    if (!activeOption) return;
+    setErrorMsg(null);
+    try {
+      const result = await mutations.generateFinancialDoc.mutateAsync({
+        format: docFormat,
+        lang: docLang,
+        deliveryOptionId: activeOption.id,
+      });
+      await downloadFile(result.fileUrl, result.fileName);
+    } catch (err) {
+      setErrorMsg(extractError(err, "خطا در تولید سند این گزینه"));
+    }
+  }
+
+  return (
+    <div className="rounded-xl p-5 bg-surface border border-border shadow-card">
+      <p className="text-sm font-semibold text-textPrimary mb-3">قیمت‌گذاری بازرگانی به تفکیک ترم تحویل</p>
+
+      <div className="flex flex-wrap gap-1.5 mb-4 border-b border-border pb-3">
+        {options.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            onClick={() => setActiveId(o.id)}
+            className={`text-xs font-mono px-3.5 py-2 rounded-lg font-medium transition-all duration-150 ${
+              activeId === o.id
+                ? "bg-primary text-white shadow-xs"
+                : "bg-bg text-textSecondary hover:text-textPrimary border border-border"
+            }`}
+            dir="ltr"
+          >
+            {o.deliveryTerm}
+            {o.isPrimary && <span className="mr-1 opacity-70">·پیش‌فرض</span>}
+          </button>
+        ))}
+      </div>
+
+      {activeOption && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2.5 bg-bg">
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <span className="text-textSecondary">
+                ارز: <span className="font-mono text-textPrimary">{activeOption.currencyCode}</span>
+              </span>
+              <span className="text-textSecondary">
+                زمان تحویل: <span className="font-mono text-textPrimary">{activeOption.deliveryDays} روز</span>
+              </span>
+              {activeOption.incotermLocation && (
+                <span className="text-textSecondary">
+                  محل تحویل: <span className="text-textPrimary">{activeOption.incotermLocation}</span>
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Select value={docFormat} onChange={(e) => setDocFormat(e.target.value as "pdf" | "xlsx")} className="!w-20 !py-1.5 text-[11px]">
+                <option value="pdf">PDF</option>
+                <option value="xlsx">Excel</option>
+              </Select>
+              <Select value={docLang} onChange={(e) => setDocLang(e.target.value as "fa" | "en")} className="!w-20 !py-1.5 text-[11px]">
+                <option value="fa">فارسی</option>
+                <option value="en">English</option>
+              </Select>
+              <button
+                type="button"
+                onClick={generateOptionDoc}
+                disabled={mutations.generateFinancialDoc.isPending}
+                className="flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg text-white bg-accent disabled:opacity-60"
+              >
+                <FileText size={12} /> {mutations.generateFinancialDoc.isPending ? "در حال تولید..." : "دریافت فایل این گزینه"}
+              </button>
+            </div>
+          </div>
+
+          {errorMsg && <p className="text-xs text-danger">{errorMsg}</p>}
+
+          <div className="space-y-2">
+            {activeOption.items.map((item) => (
+              <SalesAdjustmentRow
+                key={item.id}
+                item={item}
+                optionId={activeOption.id}
+                optionCurrency={activeOption.currencyCode}
+                inquiryId={inquiry.id}
+                canAdjustSales={canAdjustSales}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -481,6 +753,16 @@ export function ProposalTab({ inquiry }: { inquiry: InquiryDetail }) {
           ))}
         </div>
       </div>
+
+      {/* فاز ۶۰ (اصلاح — بازخورد کاربر) — نمایش فقط‌خواندنی قیمت‌های بازرگانی محاسبه‌شده به تفکیک
+      هر گزینه Incoterm («یک پیشنهاد، چند Incoterm») + اصلاح فروش. مدیریت مارک‌آپ/هزینه اضافی/
+      افزودن گزینه در تب «انتخاب نهایی و قیمت‌گذاری» انجام می‌شه، نه اینجا. جدا از فرم پیشنهاد
+      مالی زیر که همچنان مسیر تک‌ترمی/قدیمی رو نگه می‌داره (سازگاری کامل با پیشنهادهای قبل از این فاز) */}
+      <CustomerPricingOptions
+        inquiry={inquiry}
+        options={data.financial.pricingDeliveryOptions}
+        canAdjustSales={canEdit}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* پیشنهاد مالی */}
