@@ -40,8 +40,9 @@ export class ProposalDocumentsService {
     kind: ProposalDocKind,
     format: ProposalDocFormat,
     lang: ProposalDocLang,
+    deliveryOptionId?: string,
   ): Promise<{ fileUrl: string; fileName: string }> {
-    const data = await this.proposalService.getDocumentData(inquiryId, kind);
+    const data = await this.proposalService.getDocumentData(inquiryId, kind, deliveryOptionId);
     const logoUrl = data.ourEntity?.logoUrl ?? null;
     const ext = logoUrl ? extname(logoUrl).toLowerCase() : null;
     const logoBuffer = logoUrl ? await this.storage.readBuffer(logoUrl).catch(() => null) : null;
@@ -53,7 +54,10 @@ export class ProposalDocumentsService {
     // (preferredBaseName، پاکسازی‌شده در StorageService)؛ هر دو بر مبنای «Commercial/Technical Offer»
     // + شماره پیشنهاد، طبق درخواست کاربر — نه صرفاً شماره خام.
     const kindLabel = kind === "financial" ? "Commercial Offer" : "Technical Offer";
-    const baseName = `${kindLabel} ${data.proposalNumber}-${lang}`;
+    // فاز ۶۰ — وقتی سند مخصوص یک گزینه‌ی ترم تحویل خاصه، ترم توی نام فایل هم مشخص می‌شه
+    // تا کاربر بین «Commercial Offer X-CPT» و «...-DDP» گم نشه
+    const termSuffix = deliveryOptionId && data.chosenDeliveryTerm ? `-${data.chosenDeliveryTerm}` : "";
+    const baseName = `${kindLabel} ${data.proposalNumber}${termSuffix}-${lang}`;
 
     let buffer: Buffer;
     let fileName: string;
@@ -74,13 +78,18 @@ export class ProposalDocumentsService {
 
     const stored = await this.storage.save(fileName, buffer, {
       folderHint: data.internalNumber,
-      preferredBaseName: `${kindLabel}-${data.proposalNumber}-${lang}`,
+      preferredBaseName: `${kindLabel}-${data.proposalNumber}${termSuffix}-${lang}`,
     });
 
-    if (kind === "financial") {
-      await this.proposalService.setFinancialFile(inquiryId, stored.fileUrl);
-    } else {
-      await this.proposalService.setTechnicalFile(inquiryId, stored.fileUrl);
+    // فاز ۶۰ — fileUrl تک‌مقداره روی خود پیشنهاد فقط برای مسیر قدیمی/تک‌گزینه‌ای معنا داره؛
+    // وقتی سند مخصوص یک گزینه‌ی خاص تولید می‌شه، این فیلد رو بازنویسی نمی‌کنیم (چند گزینه
+    // ممکنه هم‌زمان سند داشته باشن، یکی نباید جای بقیه رو بگیره)
+    if (!deliveryOptionId) {
+      if (kind === "financial") {
+        await this.proposalService.setFinancialFile(inquiryId, stored.fileUrl);
+      } else {
+        await this.proposalService.setTechnicalFile(inquiryId, stored.fileUrl);
+      }
     }
 
     return { fileUrl: stored.fileUrl, fileName };

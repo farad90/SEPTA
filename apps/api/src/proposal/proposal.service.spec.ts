@@ -22,7 +22,7 @@ function buildPrisma() {
       create: jest.fn(),
       update: jest.fn(),
     },
-    financialProposalItem: { update: jest.fn() },
+    financialProposalItem: { update: jest.fn(), create: jest.fn(), findFirst: jest.fn() },
     financialProposalPriceChangeRequest: {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
@@ -39,9 +39,18 @@ function buildPrisma() {
       update: jest.fn(),
     },
     technicalProposalItem: { update: jest.fn() },
-    inquiryItem: { findUnique: jest.fn().mockResolvedValue(null) },
+    inquiryItem: { findUnique: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
     ourEntity: { findUnique: jest.fn().mockResolvedValue(null) },
     user: { findMany: jest.fn().mockResolvedValue([]) },
+    // فاز ۶۰ (اصلاح) — گزینه‌های ترم تحویل حالا در سطح خودِ استعلام‌ان (SelectionService)؛
+    // اینجا فقط برای saveSalesAdjustment/getDocumentData لازمن
+    inquiryPricingOption: {
+      findFirst: jest.fn(),
+    },
+    inquiryPricingOptionItem: {
+      findFirst: jest.fn(),
+      update: jest.fn(),
+    },
   };
   // فاز ۴۰-ب: getOrSeed*/revise* حالا از تراکنش تعاملی (callback) استفاده می‌کنن، نه فقط آرایه —
   // این mock هر دو شکل رو پشتیبانی می‌کنه (callback با خود prisma به‌عنوان tx صدا زده می‌شه)
@@ -61,7 +70,7 @@ function buildPrismaShape() {
     currency: { findUnique: jest.Mock };
     supplierOfferItem: { findMany: jest.Mock };
     financialProposal: { findFirst: jest.Mock; findMany: jest.Mock; count: jest.Mock; create: jest.Mock; update: jest.Mock };
-    financialProposalItem: { update: jest.Mock };
+    financialProposalItem: { update: jest.Mock; create: jest.Mock; findFirst: jest.Mock };
     financialProposalPriceChangeRequest: {
       findFirst: jest.Mock;
       findUnique: jest.Mock;
@@ -72,9 +81,11 @@ function buildPrismaShape() {
     };
     technicalProposal: { findFirst: jest.Mock; findMany: jest.Mock; count: jest.Mock; create: jest.Mock; update: jest.Mock };
     technicalProposalItem: { update: jest.Mock };
-    inquiryItem: { findUnique: jest.Mock };
+    inquiryItem: { findUnique: jest.Mock; findMany: jest.Mock };
     ourEntity: { findUnique: jest.Mock };
     user: { findMany: jest.Mock };
+    inquiryPricingOption: { findFirst: jest.Mock };
+    inquiryPricingOptionItem: { findFirst: jest.Mock; update: jest.Mock };
     $transaction: jest.Mock;
   };
 }
@@ -119,7 +130,11 @@ const BASELINE_SELECTION_STATE = {
 
 function buildService(prisma: ReturnType<typeof buildPrisma>) {
   const activityLog = { log: jest.fn().mockResolvedValue({}) };
-  const selection = { getSelection: jest.fn().mockResolvedValue(BASELINE_SELECTION_STATE) };
+  const selection = {
+    getSelection: jest.fn().mockResolvedValue(BASELINE_SELECTION_STATE),
+    listPricingOptions: jest.fn().mockResolvedValue([]),
+    getPricingOptionOrThrow: jest.fn().mockResolvedValue({ id: "opt-1" }),
+  };
   const notifications = { create: jest.fn().mockResolvedValue({}) };
   // ourEntity.findUnique پیش‌فرض null برمی‌گرده (buildPrisma) پس resolveOurEntity هم null می‌شه و
   // proposalNumber.nextNumber اصلاً صدا زده نمی‌شه — یک mock ساده کافیه، نیازی به پیاده‌سازی واقعی نیست
@@ -795,7 +810,7 @@ describe("ProposalService — ویرایش/ارسال/اصلاح مستقل هر
       requestedPrice: 9,
       requestedBy: "sales-1",
       status: "pending",
-      item: {
+      legacyItem: {
         proposal: { inquiryId: INQUIRY_ID, proposalNumber: "INQ-2026-0001-FIN-v1", version: 1 },
         inquiryItem: { rowIndex: 1, itemCode: "BRG-6205" },
       },
@@ -832,7 +847,7 @@ describe("ProposalService — ویرایش/ارسال/اصلاح مستقل هر
       requestedPrice: 9,
       requestedBy: "sales-1",
       status: "pending",
-      item: {
+      legacyItem: {
         proposal: { inquiryId: INQUIRY_ID, proposalNumber: "INQ-2026-0001-FIN-v1", version: 1 },
         inquiryItem: { rowIndex: 1, itemCode: "BRG-6205" },
       },
@@ -852,7 +867,7 @@ describe("ProposalService — ویرایش/ارسال/اصلاح مستقل هر
     prisma.financialProposalPriceChangeRequest.findUnique.mockResolvedValue({
       id: "pcr-1",
       status: "approved",
-      item: { proposal: { inquiryId: INQUIRY_ID }, inquiryItem: { rowIndex: 1 } },
+      legacyItem: { proposal: { inquiryId: INQUIRY_ID }, inquiryItem: { rowIndex: 1 } },
     });
     const { service } = buildService(prisma);
 
@@ -979,5 +994,158 @@ describe("ProposalService — توزیع هزینه ترم تحویل بین ا�
     expect(doc.items[0].unitPrice).toBe(30);
     expect(doc.items[0].totalPrice).toBe(300);
     expect(doc.totalAmount).toBe(300);
+  });
+});
+
+// ============================================================
+// فاز ۶۰ (اصلاح — بازخورد کاربر) — هزینه‌های اضافی/گزینه‌های ترم تحویل/مارک‌آپ («تعیین حاشیه
+// سود») به مرحله «انتخاب نهایی و قیمت‌گذاری» منتقل شدن؛ پوشش تست کامل این بخش‌ها حالا در
+// selection.service.spec.ts هست (listPricingCosts/createPricingCost/deletePricingCost،
+// listPricingOptions/addPricingOption/removePricingOption/saveMarkup). اینجا فقط دو چیزی که
+// واقعاً در دامنه Proposal مونده رو تست می‌کنیم: اصلاح فروش (saveSalesAdjustment) و
+// getDocumentData با انتخاب گزینه.
+// ============================================================
+
+describe("ProposalService — فاز ۶۰ (اصلاح): اصلاح فروش (saveSalesAdjustment) هرگز قیمت/مارک‌آپ بازرگانی رو تغییر نمی‌ده", () => {
+  it("applies a normal (above-baseline) adjustment directly and never touches markupPercent/commercialCalculatedPrice", async () => {
+    const prisma = buildPrisma();
+    mockLockedInquiry(prisma);
+    prisma.inquiryPricingOption.findFirst.mockResolvedValue({ id: "opt-1", inquiryId: INQUIRY_ID, deliveryTerm: "CPT" });
+    prisma.inquiryPricingOptionItem.findFirst.mockResolvedValue({
+      id: "fpi-1",
+      inquiryItemId: "item-1",
+      commercialCalculatedPrice: 13,
+    });
+    prisma.inquiryItem.findUnique.mockResolvedValue({ finalSalePrice: 10 }); // خط پایه مدیریت — پایین‌تر از قیمت نهایی جدید
+    const { service, selection } = buildService(prisma);
+
+    await service.saveSalesAdjustment(
+      INQUIRY_ID,
+      "opt-1",
+      { inquiryItemId: "item-1", adjustmentAmount: -1, reasonCode: "customer_negotiation" },
+      "user-1",
+    );
+
+    expect(prisma.inquiryPricingOptionItem.update).toHaveBeenCalledWith({
+      where: { id: "fpi-1" },
+      data: expect.objectContaining({
+        salesAdjustmentAmount: -1,
+        salesAdjustmentReasonCode: "customer_negotiation",
+        finalSalePrice: 12, // 13 + (-1)
+      }),
+    });
+    const call = prisma.inquiryPricingOptionItem.update.mock.calls[0][0] as { data: Record<string, unknown> };
+    expect(call.data).not.toHaveProperty("markupPercent");
+    expect(call.data).not.toHaveProperty("commercialCalculatedPrice");
+    expect(selection.getPricingOptionOrThrow).toHaveBeenCalledWith(INQUIRY_ID, "opt-1");
+  });
+
+  it("routes a below-baseline adjustment through the existing price-reduction approval flow instead of applying it directly", async () => {
+    const prisma = buildPrisma();
+    mockLockedInquiry(prisma);
+    prisma.inquiryPricingOption.findFirst.mockResolvedValue({ id: "opt-1", inquiryId: INQUIRY_ID, deliveryTerm: "CPT" });
+    prisma.inquiryPricingOptionItem.findFirst.mockResolvedValue({
+      id: "fpi-1",
+      inquiryItemId: "item-1",
+      commercialCalculatedPrice: 13,
+    });
+    prisma.inquiryItem.findUnique.mockResolvedValue({ finalSalePrice: 12 }); // خط پایه بالاتر از قیمت نهایی جدید (13-5=8)
+    prisma.financialProposalPriceChangeRequest.findFirst.mockResolvedValue(null);
+    prisma.financialProposalPriceChangeRequest.create.mockResolvedValue({ id: "pcr-1" });
+    prisma.user.findMany.mockResolvedValue([{ id: "manager-1" }]); // دارنده proposal.approve_price_reduction
+    const { service, notifications } = buildService(prisma);
+
+    await service.saveSalesAdjustment(INQUIRY_ID, "opt-1", { inquiryItemId: "item-1", adjustmentAmount: -5 }, "user-1");
+
+    // finalSalePrice نباید مستقیم اینجا نوشته بشه — تصمیم مونده به تأیید مدیر
+    const call = prisma.inquiryPricingOptionItem.update.mock.calls[0][0] as { data: Record<string, unknown> };
+    expect(call.data).not.toHaveProperty("finalSalePrice");
+    expect(call.data.salesAdjustmentAmount).toBe(-5);
+
+    expect(prisma.financialProposalPriceChangeRequest.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ requestedPrice: 8, pricingOptionItemId: "fpi-1" }) }),
+    );
+    expect(notifications.create).toHaveBeenCalled();
+  });
+});
+
+describe("ProposalService — فاز ۶۰: getDocumentData با deliveryOptionId — بدون نشت داده بین گزینه‌ها", () => {
+  it("builds the document strictly from the selected option's own items, not the flat/primary fields", async () => {
+    const prisma = buildPrisma();
+    prisma.inquiry.findUnique.mockResolvedValue({
+      id: INQUIRY_ID,
+      deletedAt: null,
+      selectionLockedAt: new Date(),
+      internalNumber: "INQ-2026-0001",
+      inquiryNumber: "REF-1",
+      buyer: { companyName: "مشتری" },
+      buyerContact: null,
+      salesExpert: { fullName: "کارشناس", fullNameEn: null, phone: null, mobile: null, email: null },
+    });
+    prisma.financialProposal.findFirst.mockResolvedValue({
+      id: "fp-1",
+      proposalNumber: "2026-پ ت-0001",
+      version: 1,
+      preparedDate: new Date(),
+      proposalValidityDate: null,
+      // ⚠️ فیلدهای تخت (مسیر قدیمی) عمداً یک ترم/قیمت متفاوت دارن تا نشت رو ثابت کنه
+      currencyCode: "EUR",
+      chosenDeliveryTerm: "EXW",
+      deliveryDays: 45,
+      deliveryDaysUnit: "day",
+      paymentTerms: null,
+      items: [{ inquiryItemId: "item-1", finalSalePrice: 12 }],
+      ourEntityId: null,
+    });
+    prisma.inquiryPricingOption.findFirst.mockResolvedValue({
+      id: "opt-ddp",
+      deliveryTerm: "DDP",
+      incotermLocation: "Tehran",
+      shippingMethod: "Road",
+      deliveryDays: 90,
+      deliveryDaysUnit: "day",
+      paymentTerms: "50% advance",
+      currencyCode: "EUR",
+      exchangeRateFromCurrency: null,
+      exchangeRateValue: null,
+      items: [{ inquiryItemId: "item-1", finalSalePrice: 999 }], // عمداً کاملاً متفاوت از مسیر تخت
+    });
+    const { service } = buildService(prisma);
+
+    const flatDoc = await service.getDocumentData(INQUIRY_ID, "financial");
+    const ddpDoc = await service.getDocumentData(INQUIRY_ID, "financial", "opt-ddp");
+
+    expect(flatDoc.chosenDeliveryTerm).toBe("EXW");
+    expect(flatDoc.items[0].unitPrice).toBe(12);
+
+    expect(ddpDoc.chosenDeliveryTerm).toBe("DDP");
+    expect(ddpDoc.incotermLocation).toBe("Tehran");
+    expect(ddpDoc.items[0].unitPrice).toBe(999);
+    expect(ddpDoc.items[0].totalPrice).toBe(9990); // 999 * quantity(10)
+
+    // هیچ مقداری از مسیر تخت (EXW/12) نباید در سند DDP دیده بشه
+    expect(ddpDoc.chosenDeliveryTerm).not.toBe(flatDoc.chosenDeliveryTerm);
+    expect(ddpDoc.items[0].unitPrice).not.toBe(flatDoc.items[0].unitPrice);
+  });
+
+  it("throws NotFound when the requested delivery option doesn't belong to this proposal", async () => {
+    const prisma = buildPrisma();
+    prisma.inquiry.findUnique.mockResolvedValue({
+      id: INQUIRY_ID,
+      deletedAt: null,
+      selectionLockedAt: new Date(),
+      internalNumber: "INQ-2026-0001",
+      inquiryNumber: "REF-1",
+      buyer: { companyName: "مشتری" },
+      buyerContact: null,
+      salesExpert: { fullName: "کارشناس", fullNameEn: null, phone: null, mobile: null, email: null },
+    });
+    prisma.financialProposal.findFirst.mockResolvedValue({ id: "fp-1", items: [] });
+    prisma.inquiryPricingOption.findFirst.mockResolvedValue(null);
+    const { service } = buildService(prisma);
+
+    await expect(service.getDocumentData(INQUIRY_ID, "financial", "opt-missing")).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });

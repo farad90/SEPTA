@@ -93,7 +93,9 @@ describe("ProposalDocumentsService", () => {
 
     const result = await service.generate("inq-1", "financial", "pdf", "fa");
 
-    expect(deps.proposalService.getDocumentData).toHaveBeenCalledWith("inq-1", "financial");
+    // فاز ۶۰ — generate() حالا یک deliveryOptionId اختیاری هم به getDocumentData پاس می‌ده
+    // (اینجا undefined چون کوئری‌پارام تعیین نشده، یعنی مسیر قدیمی تک‌گزینه‌ای)
+    expect(deps.proposalService.getDocumentData).toHaveBeenCalledWith("inq-1", "financial", undefined);
     expect(deps.pdfRenderer.renderHtmlToPdf).toHaveBeenCalled();
     expect(deps.excelRenderer.render).not.toHaveBeenCalled();
     expect(deps.storage.save).toHaveBeenCalledWith(

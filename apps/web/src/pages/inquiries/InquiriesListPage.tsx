@@ -183,6 +183,34 @@ function PurchasePriceCell({ row }: { row: InquiryListRow }) {
   );
 }
 
+/** ستون «برند» — یک پرونده می‌تونه چند برند درخواستی هم‌زمان داشته باشه */
+function BrandCell({ row }: { row: InquiryListRow }) {
+  if (row.builders.length === 0) return <span className="text-xs text-textSecondary">—</span>;
+  return (
+    <div className="text-xs text-textPrimary">
+      {row.builders.map((b) => (
+        <span key={b} className="block truncate" title={b}>
+          {b}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** ستون «تأمین‌کننده» — فقط بعد از مرحله انتخاب نهایی (وقتی آفری برای قلمی انتخاب شده) مقدار می‌گیره */
+function SupplierCell({ row }: { row: InquiryListRow }) {
+  if (row.suppliers.length === 0) return <span className="text-xs text-textSecondary">—</span>;
+  return (
+    <div className="text-xs text-textPrimary">
+      {row.suppliers.map((s) => (
+        <span key={s} className="block truncate" title={s}>
+          {s}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /** ستون «شماره PO» — یک پرونده می‌تونه چند PO داشته باشه (چند تأمین‌کننده/محموله) */
 function PoNumberCell({ row }: { row: InquiryListRow }) {
   const numbers = row.poNumbers ?? [];
@@ -252,9 +280,11 @@ type ColumnKey =
   | "internalNumber"
   | "subject"
   | "buyer"
+  | "brand"
   | "action"
   | "status"
   | "saleValue"
+  | "supplier"
   | "poNumber"
   | "purchasePrice"
   | "profitPercent"
@@ -268,9 +298,11 @@ const COLUMN_LABEL: Record<ColumnKey, string> = {
   internalNumber: "شماره داخلی",
   subject: "موضوع",
   buyer: "مشتری",
+  brand: "برند",
   action: "نیاز به اقدام",
   status: "مرحله",
   saleValue: "ارزش استعلام",
+  supplier: "تأمین‌کننده",
   poNumber: "شماره PO",
   purchasePrice: "قیمت خرید",
   profitPercent: "درصد سود تقریبی",
@@ -290,8 +322,10 @@ const COLUMN_MIN_WIDTH_PX: Partial<Record<ColumnKey, number>> = {
   internalNumber: 120,
   subject: 170,
   buyer: 110,
+  brand: 110,
   status: 110,
   saleValue: 110,
+  supplier: 130,
   poNumber: 110,
   purchasePrice: 110,
   profitPercent: 90,
@@ -315,9 +349,11 @@ const ALL_COLUMN_KEYS: ColumnKey[] = [
   "internalNumber",
   "subject",
   "buyer",
+  "brand",
   "action",
   "status",
   "saleValue",
+  "supplier",
   "poNumber",
   "purchasePrice",
   "profitPercent",
@@ -341,7 +377,7 @@ function getAvailableColumns(perm: {
   canViewPurchasePrice: boolean;
   canViewProfit: boolean;
 }): ColumnKey[] {
-  const columns: ColumnKey[] = ["internalNumber", "subject", "buyer", "action", "status", "saleValue"];
+  const columns: ColumnKey[] = ["internalNumber", "subject", "buyer", "brand", "action", "status", "saleValue", "supplier"];
   if (perm.canViewPo) columns.push("poNumber");
   if (perm.canViewPurchasePrice) columns.push("purchasePrice");
   if (perm.canViewProfit) columns.push("profitPercent", "profitAmount");
@@ -357,6 +393,8 @@ function sortValue(row: InquiryListRow, key: ColumnKey): string | number {
       return row.subject;
     case "buyer":
       return row.buyer.companyName;
+    case "brand":
+      return row.builders[0] ?? "";
     case "action":
       // مرتب‌سازی واقعی این ستون چندکلیدیه و در useMemo با compareByAction انجام می‌شه؛
       // این مقدار فقط برای کامل بودن نوع لازمه، در عمل مصرف نمی‌شه
@@ -367,6 +405,8 @@ function sortValue(row: InquiryListRow, key: ColumnKey): string | number {
       // چندارزی دقیق قابل جمع‌زدن نیست؛ برای مرتب‌سازی صرفاً مجموع خام همه ارزها کافیه
       // (اکثر پرونده‌ها تک‌ارزن) — دقت واحدی مثل ستون «اولویت» که خودش هم یک تقریبه
       return Object.values(row.saleValueByCurrency).reduce((sum, v) => sum + v, 0);
+    case "supplier":
+      return row.suppliers[0] ?? "";
     case "poNumber":
       return row.poNumbers?.[0] ?? "";
     case "purchasePrice":
@@ -397,6 +437,8 @@ function columnOptions(row: InquiryListRow, key: ColumnKey): string[] {
       return [row.subject];
     case "buyer":
       return [row.buyer.companyName];
+    case "brand":
+      return row.builders.length > 0 ? row.builders : ["(بدون برند)"];
     case "action":
       return [row.actionRequired ?? "(بدون اقدام باز)"];
     case "status":
@@ -407,6 +449,8 @@ function columnOptions(row: InquiryListRow, key: ColumnKey): string[] {
         ? entries.map(({ currency, amount }) => `${fmtAmount(amount)} ${currency}`)
         : ["(بدون قیمت‌گذاری نهایی)"];
     }
+    case "supplier":
+      return row.suppliers.length > 0 ? row.suppliers : ["(بدون تأمین‌کننده)"];
     case "poNumber":
       return row.poNumbers && row.poNumbers.length > 0 ? row.poNumbers : ["(بدون PO)"];
     case "purchasePrice": {
@@ -693,9 +737,11 @@ function emptyColFilters(): Record<ColumnKey, Set<string> | null> {
     internalNumber: null,
     subject: null,
     buyer: null,
+    brand: null,
     action: null,
     status: null,
     saleValue: null,
+    supplier: null,
     poNumber: null,
     purchasePrice: null,
     profitPercent: null,
@@ -963,6 +1009,9 @@ export function InquiriesListPage() {
                         <span className="block truncate" title={row.buyer.companyName}>{row.buyer.companyName}</span>
                       </td>
                     )}
+                    {displayColumns.includes("brand") && (
+                      <td className="px-3 py-2"><BrandCell row={row} /></td>
+                    )}
                     {/* فاز ۵۸ — «نیاز به اقدام»: عمداً پررنگ‌تر از نشان مرحله، طبق الزام UX */}
                     {displayColumns.includes("action") && (
                       <td className="px-3 py-2"><ActionCell row={row} /></td>
@@ -972,6 +1021,9 @@ export function InquiriesListPage() {
                     )}
                     {displayColumns.includes("saleValue") && (
                       <td className="px-3 py-2"><SaleValueCell row={row} /></td>
+                    )}
+                    {displayColumns.includes("supplier") && (
+                      <td className="px-3 py-2"><SupplierCell row={row} /></td>
                     )}
                     {/* فاز ۵۹ — چهار ستون Permission-gated؛ فقط وقتی هم مجازن (availableColumns) هم
                     کاربر انتخابشون کرده (visibleColumns) در displayColumns حاضرن */}

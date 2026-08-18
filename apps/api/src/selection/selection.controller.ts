@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -19,6 +20,9 @@ import {
   LockSelectionDto,
   SaveDeliveryOptionsDto,
   SaveSelectionDto,
+  SavePricingCostDto,
+  AddPricingOptionDto,
+  SavePricingOptionMarkupDto,
 } from "./dto/selection.dto";
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -71,5 +75,78 @@ export class SelectionController {
   @Post("unlock")
   unlock(@Param("id", ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
     return this.service.unlock(id, user.userId);
+  }
+
+  // ------------------------------------------------------------
+  // فاز ۶۰ (اصلاح) — قیمت‌گذاری بازرگانی به تفکیک ترم تحویل، همین‌جا (نه در تب پیشنهاد به مشتری)
+  // ------------------------------------------------------------
+
+  @RequirePermissions("selection.view")
+  @Get("pricing-costs")
+  listPricingCosts(@Param("id", ParseUUIDPipe) id: string) {
+    return this.service.listPricingCosts(id);
+  }
+
+  @RequirePermissions("selection.set_markup")
+  @Post("pricing-costs")
+  createPricingCost(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: SavePricingCostDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.createPricingCost(id, dto, user.userId);
+  }
+
+  @RequirePermissions("selection.set_markup")
+  @Patch("pricing-costs/:costId")
+  updatePricingCost(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("costId", ParseUUIDPipe) costId: string,
+    @Body() dto: SavePricingCostDto,
+  ) {
+    return this.service.updatePricingCost(id, costId, dto);
+  }
+
+  @RequirePermissions("selection.set_markup")
+  @Delete("pricing-costs/:costId")
+  deletePricingCost(@Param("id", ParseUUIDPipe) id: string, @Param("costId", ParseUUIDPipe) costId: string) {
+    return this.service.deletePricingCost(id, costId);
+  }
+
+  @RequirePermissions("selection.view")
+  @Get("pricing-options")
+  listPricingOptions(@Param("id", ParseUUIDPipe) id: string) {
+    return this.service.listPricingOptions(id);
+  }
+
+  @RequirePermissions("selection.set_markup")
+  @Post("pricing-options")
+  addPricingOption(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: AddPricingOptionDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.addPricingOption(id, dto, user.userId);
+  }
+
+  @RequirePermissions("selection.set_markup")
+  @Delete("pricing-options/:optionId")
+  removePricingOption(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("optionId", ParseUUIDPipe) optionId: string,
+  ) {
+    return this.service.removePricingOption(id, optionId);
+  }
+
+  /** «اعمال به همه» + override تک‌تک اقلام */
+  @RequirePermissions("selection.set_markup")
+  @Patch("pricing-options/:optionId/markup")
+  saveMarkup(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("optionId", ParseUUIDPipe) optionId: string,
+    @Body() dto: SavePricingOptionMarkupDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.saveMarkup(id, optionId, dto, user.userId);
   }
 }

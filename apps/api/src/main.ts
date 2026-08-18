@@ -6,6 +6,7 @@ import { Logger } from "nestjs-pino";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
+import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 
 async function bootstrap() {
   // bufferLogs holds Nest's startup logs until the pino Logger below is

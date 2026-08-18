@@ -64,6 +64,9 @@ model User {
   shipmentEditRequestsDecided ShipmentEditRequest[] @relation("ShipmentEditDecidedBy")
   priceChangeRequestsMade    FinancialProposalPriceChangeRequest[] @relation("PriceChangeRequestedBy")
   priceChangeRequestsDecided FinancialProposalPriceChangeRequest[] @relation("PriceChangeDecidedBy")
+  pricingCostsCreated        InquiryPricingCost[]                   @relation("PricingCostCreatedBy")
+  pricingOptionItemsCommercialPriced InquiryPricingOptionItem[] @relation("PricingOptionItemCommercialPricer")
+  pricingOptionItemsSalesAdjusted    InquiryPricingOptionItem[] @relation("PricingOptionItemSalesAdjuster")
   rfqsAsCommercialExpert SupplierRfq[]         @relation("RfqCommercialExpert")
   rfqDeleteRequestsMade    RfqDeleteRequest[]  @relation("RfqDeleteRequestedBy")
   rfqDeleteRequestsDecided RfqDeleteRequest[]  @relation("RfqDeleteDecidedBy")
@@ -307,6 +310,8 @@ model Inquiry {
   discussions      InquiryDiscussion[]
   rfqs             SupplierRfq[]
   deliveryOptions  InquiryDeliveryOption[]
+  pricingCosts     InquiryPricingCost[]
+  pricingOptions   InquiryPricingOption[]
   selectionExchangeRates InquirySelectionExchangeRate[]
   financialProposals FinancialProposal[]
   technicalProposals TechnicalProposal[]
@@ -363,6 +368,7 @@ model InquiryItem {
   selectedOfferItem SupplierOfferItem?    @relation("SelectedOfferItem", fields: [selectedOfferItemId], references: [id])
   financialProposalItems FinancialProposalItem[]
   technicalProposalItems TechnicalProposalItem[]
+  pricingOptionItems      InquiryPricingOptionItem[]
   outcome                InquiryItemOutcome?
   orderItems              OrderItem[]
   warehouseReceiptItems   WarehouseReceiptItem[]
@@ -650,6 +656,8 @@ model Currency {
 
   offerItems         SupplierOfferItem[]
   financialProposals FinancialProposal[]
+  pricingCosts       InquiryPricingCost[]
+  pricingOptions     InquiryPricingOption[]
   inquiriesAsSelectionBase Inquiry[]
   selectionExchangeRates   InquirySelectionExchangeRate[]
   purchaseOrders     PurchaseOrder[]
@@ -1315,6 +1323,101 @@ model InquiryDeliveryOption {
   @@map("inquiry_delivery_options")
 }
 
+// فاز ۶۰ — هزینه‌های اضافی قابل‌تخصیص به قیمت‌گذاری (حمل/بیمه/گمرک/...)، در سطح استعلام
+// ثبت می‌شن (یک‌بار، برای همه نسخه‌های پیشنهاد قابل استفاده‌ست) نه در سطح یک نسخه پیشنهاد خاص.
+// includeInMarginBase مشخص می‌کنه این هزینه قبل از اعمال مارک‌آپ به هزینه پایه اضافه می‌شه یا
+// بعد از محاسبه مارک‌آپ روی قیمت نهایی سوار می‌شه. deliveryTerm=NULL یعنی روی همه گزینه‌های
+// ترم تحویل این پیشنهاد اعمال می‌شه؛ پرشده یعنی مخصوص همون ترم (مثلاً بیمه فقط برای DDP).
+model InquiryPricingCost {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  inquiryId           String   @map("inquiry_id") @db.Uuid
+  description         String   @db.VarChar(300)
+  amount              Decimal  @db.Decimal(18, 4)
+  currencyCode        String   @map("currency_code") @db.VarChar(3)
+  includeInMarginBase Boolean  @default(true) @map("include_in_margin_base")
+  deliveryTerm        String?  @map("delivery_term") @db.VarChar(10)
+  createdBy           String?  @map("created_by") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  inquiry Inquiry  @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  currency Currency @relation(fields: [currencyCode], references: [currencyCode])
+  creator  User?    @relation("PricingCostCreatedBy", fields: [createdBy], references: [id])
+
+  @@map("inquiry_pricing_costs")
+}
+
+// فاز ۶۰ (اصلاح — بازخورد کاربر) — قیمت‌گذاری بازرگانی («تعیین حاشیه سود») به تفکیک ترم
+// تحویل، عمداً در سطح خودِ استعلام (نه در سطح یک نسخه‌ی FinancialProposal خاص)، چون این تصمیم
+// باید فقط در مرحله «انتخاب نهایی و قیمت‌گذاری» اتفاق بیفته — قبل از قفل‌شدن انتخاب نهایی و
+// قبل از اینکه اصلاً پیشنهادی برای مشتری ساخته شده باشه. یک FinancialProposal فقط بعد از
+// selection_locked_at ساخته می‌شه (assertLocked)، پس اگه این جدول‌ها به FinancialProposal
+// وصل می‌بودن، مدیریت اصلاً امکان تعیین مارک‌آپ رو در تب «انتخاب نهایی» نداشت — دقیقاً
+// همون اشتباهی که در طراحی اول این فاز اتفاق افتاد و اصلاح شد.
+// وقتی بعداً پیشنهاد به مشتری تولید می‌شه، فقط از این جدول‌ها می‌خونه (getDocumentData) —
+// چیزی اینجا از تب «پیشنهاد به مشتری» نوشته نمی‌شه، به‌جز فیلدهای اصلاح فروش که مخصوص فروشه.
+model InquiryPricingOption {
+  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  inquiryId                String   @map("inquiry_id") @db.Uuid
+  deliveryTerm             String   @map("delivery_term") @db.VarChar(10)
+  incotermLocation         String?  @map("incoterm_location") @db.VarChar(200)
+  shippingMethod           String?  @map("shipping_method") @db.VarChar(100)
+  deliveryDays             Int      @map("delivery_days")
+  deliveryDaysUnit         String   @default("day") @map("delivery_days_unit") @db.VarChar(10)
+  paymentTerms             String?  @map("payment_terms")
+  currencyCode             String   @map("currency_code") @db.VarChar(3)
+  exchangeRateFromCurrency String?  @map("exchange_rate_from_currency") @db.VarChar(3)
+  exchangeRateValue        Decimal? @map("exchange_rate_value") @db.Decimal(18, 6)
+  // اسنپ‌شات هزینه پایه محاسبه مارک‌آپ (هزینه خرید تبدیل‌شده + هزینه‌های اضافیِ include_in_margin_base) —
+  // فقط برای نمایش/حسابرسی؛ منبع حقیقت محاسبه هر بار زنده از InquiryPricingCost انجام می‌شه
+  marginBaseAmount     Decimal  @default(0) @map("margin_base_amount") @db.Decimal(18, 4)
+  defaultMarkupPercent Decimal? @map("default_markup_percent") @db.Decimal(6, 3)
+  isPrimary            Boolean  @default(false) @map("is_primary")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  inquiry  Inquiry                    @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  currency Currency                   @relation(fields: [currencyCode], references: [currencyCode])
+  items    InquiryPricingOptionItem[]
+
+  @@unique([inquiryId, deliveryTerm])
+  @@map("inquiry_pricing_options")
+}
+
+model InquiryPricingOptionItem {
+  id                  String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  optionId            String  @map("option_id") @db.Uuid
+  inquiryItemId       String  @map("inquiry_item_id") @db.Uuid
+  // هزینه پایه‌ی این قلم (هزینه خرید تبدیل‌شده + سهم هزینه‌های اضافیِ داخل هزینه پایه) — اسنپ‌شات
+  purchasePrice Decimal? @map("purchase_price") @db.Decimal(18, 4)
+  markupPercent Decimal  @default(0) @map("markup_percent") @db.Decimal(6, 3)
+  // قیمت محاسبه‌شده بازرگانی (هزینه پایه × (۱+مارک‌آپ٪)) + هزینه‌های اضافیِ بعد از مارک‌آپ —
+  // هرگز توسط فروش بازنویسی نمی‌شه؛ عدد مرجع ثابت برای مقایسه با قیمت نهایی بعد از اصلاح فروش
+  commercialCalculatedPrice Decimal?  @map("commercial_calculated_price") @db.Decimal(18, 4)
+  commercialPricedBy        String?   @map("commercial_priced_by") @db.Uuid
+  commercialPricedAt        DateTime? @map("commercial_priced_at") @db.Timestamptz
+  // اصلاح فروش نسبت به قیمت محاسبه‌شده بازرگانی؛ finalSalePrice = commercialCalculatedPrice + این مقدار
+  // ⚠️ این چهار فیلد تنها بخشی از این جدوله که از تب «پیشنهاد به مشتری» (نه انتخاب نهایی) نوشته می‌شه
+  salesAdjustmentAmount     Decimal   @default(0) @map("sales_adjustment_amount") @db.Decimal(18, 4)
+  salesAdjustmentReasonCode String?   @map("sales_adjustment_reason_code") @db.VarChar(50)
+  salesAdjustmentNote       String?   @map("sales_adjustment_note")
+  salesAdjustedBy           String?   @map("sales_adjusted_by") @db.Uuid
+  salesAdjustedAt           DateTime? @map("sales_adjusted_at") @db.Timestamptz
+  finalSalePrice            Decimal   @default(0) @map("final_sale_price") @db.Decimal(18, 4)
+  // کدوم هزینه‌های اضافی (InquiryPricingCost) با چه مبلغی، در لحظه محاسبه این قیمت، داخل
+  // هزینه پایه مارک‌آپ لحاظ شدن — برای بخش «جزئیات پیشرفته» در UI و حسابرسی بعدی
+  marginBaseCostSnapshot Json? @map("margin_base_cost_snapshot")
+
+  option            InquiryPricingOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  inquiryItem       InquiryItem          @relation(fields: [inquiryItemId], references: [id])
+  commercialPricer  User?                @relation("PricingOptionItemCommercialPricer", fields: [commercialPricedBy], references: [id])
+  salesAdjuster     User?                @relation("PricingOptionItemSalesAdjuster", fields: [salesAdjustedBy], references: [id])
+  priceChangeRequests FinancialProposalPriceChangeRequest[]
+
+  @@unique([optionId, inquiryItemId])
+  @@map("inquiry_pricing_option_items")
+}
+
 // ============================================================
 // دامنه ۴: پیشنهاد به مشتری — فاز ۶ (جدول‌ها در baseline موجودن)
 // ============================================================
@@ -1384,19 +1487,25 @@ model FinancialProposalItem {
 }
 
 /// فاز ۳۵-ج — گردش تأیید مدیر برای کاهش قیمت پیشنهاد مالی (هم‌ساختار ShipmentEditRequest، فاز ۲۷)
+/// فاز ۶۰ (اصلاح) — دو منشأ ممکن، هر دو Nullable و دقیقاً یکی‌شون پر می‌شه (قانون کسب‌وکاری،
+/// نه Constraint دیتابیس — هم‌الگوی فرستنده/گیرنده نامه در letters):
+///   ۱) financialProposalItemId — مسیر «تخت»/تک‌ترمی قدیمی (فاز ۳۵-ج اصلی، saveFinancial)
+///   ۲) pricingOptionItemId — مسیر جدید «چند گزینه ترم تحویل» (فاز ۶۰، saveSalesAdjustment)
 model FinancialProposalPriceChangeRequest {
-  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  financialProposalItemId  String    @map("financial_proposal_item_id") @db.Uuid
-  requestedPrice           Decimal   @map("requested_price") @db.Decimal(18, 4)
-  requestedBy              String    @map("requested_by") @db.Uuid
-  status                   String    @default("pending") @db.VarChar(20)
-  decidedBy                String?   @map("decided_by") @db.Uuid
-  decidedAt                DateTime? @map("decided_at") @db.Timestamptz
-  createdAt                DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  financialProposalItemId String? @map("financial_proposal_item_id") @db.Uuid
+  pricingOptionItemId    String?   @map("pricing_option_item_id") @db.Uuid
+  requestedPrice         Decimal   @map("requested_price") @db.Decimal(18, 4)
+  requestedBy            String    @map("requested_by") @db.Uuid
+  status                 String    @default("pending") @db.VarChar(20)
+  decidedBy              String?   @map("decided_by") @db.Uuid
+  decidedAt              DateTime? @map("decided_at") @db.Timestamptz
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
-  item      FinancialProposalItem @relation(fields: [financialProposalItemId], references: [id], onDelete: Cascade)
-  requester User                  @relation("PriceChangeRequestedBy", fields: [requestedBy], references: [id])
-  decider   User?                 @relation("PriceChangeDecidedBy", fields: [decidedBy], references: [id])
+  legacyItem       FinancialProposalItem?    @relation(fields: [financialProposalItemId], references: [id], onDelete: Cascade)
+  item             InquiryPricingOptionItem? @relation(fields: [pricingOptionItemId], references: [id], onDelete: Cascade)
+  requester User                     @relation("PriceChangeRequestedBy", fields: [requestedBy], references: [id])
+  decider   User?                    @relation("PriceChangeDecidedBy", fields: [decidedBy], references: [id])
 
   @@map("financial_proposal_price_change_requests")
 }
